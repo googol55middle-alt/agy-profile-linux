@@ -19,6 +19,7 @@ from agy_cli_manager.manager import (
     set_switch_mode,
     switch_account,
     switch_next,
+    verify_accounts,
     update_switch_policy,
     update_account_runtime_metadata,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "set_switch_mode",
     "switch_account",
     "switch_next",
+    "verify_accounts",
     "update_switch_policy",
     "update_account_runtime_metadata",
 ]

@@ -41,6 +41,7 @@ from agy_cli_manager.manager import (
     switch_next,
     update_switch_policy,
     update_account_runtime_metadata,
+    verify_accounts,
 )
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,6 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("menu", help="Open the interactive menu")
     status = sub.add_parser("status", help="Show current manager status")
     status.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    verify = sub.add_parser("verify-accounts", help="Verify saved account auth/runtime usability")
+    verify.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    switch_runtime = sub.add_parser("switch-runtime", help="Show current switch coordinator state")
+    switch_runtime.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    switch_history = sub.add_parser("switch-history", help="Show recent switch audit events")
+    switch_history.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    switch_history.add_argument("--limit", type=int, default=10, help="Maximum number of recent events to print")
     current = sub.add_parser("current", help="Show the current active account")
     current.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     list_cmd = sub.add_parser("list", help="List saved accounts")
@@ -521,6 +529,61 @@ def _message_attr(message: str) -> int:
     return _severity_attr("good", bold=True)
 
 
+def _problem_badge(problem_status: str | None) -> str:
+    mapping = {
+        "ok": "OK",
+        "stale": "STALE",
+        "refresh_failed": "FAIL",
+        "cooldown": "COOL",
+        "disabled": "OFF",
+        "missing_auth": "MISS",
+        "logged_out": "OUT",
+    }
+    return mapping.get((problem_status or "").lower(), "?")
+
+
+def _problem_attr(problem_status: str | None, selected: bool = False) -> int:
+    normalized = (problem_status or "").lower()
+    if normalized in {"ok"}:
+        return _severity_attr("good", selected, bold=True)
+    if normalized in {"stale", "cooldown", "disabled"}:
+        return _severity_attr("warn", selected, bold=True)
+    if normalized in {"refresh_failed", "missing_auth", "logged_out"}:
+        return _severity_attr("bad", selected, bold=True)
+    return _severity_attr("muted", selected)
+
+
+def _problem_summary_attr(problem_counts: dict[str, int]) -> int:
+    if any(problem_counts.get(key, 0) > 0 for key in ("logged_out", "missing_auth", "refresh_failed")):
+        return _severity_attr("bad", bold=True)
+    if any(problem_counts.get(key, 0) > 0 for key in ("stale", "cooldown", "disabled")):
+        return _severity_attr("warn", bold=True)
+    return _severity_attr("good", bold=True)
+
+
+def _summarize_problem_counts(verification_accounts: dict[str, dict]) -> tuple[str, dict[str, int]]:
+    problem_counts: dict[str, int] = {}
+    for data in verification_accounts.values():
+        if not isinstance(data, dict):
+            continue
+        status = str(data.get("problem_status") or "ok")
+        if status == "ok":
+            continue
+        problem_counts[status] = problem_counts.get(status, 0) + 1
+    if not problem_counts:
+        return "Issues: none", {}
+    ordered = [
+        "logged_out",
+        "missing_auth",
+        "refresh_failed",
+        "stale",
+        "cooldown",
+        "disabled",
+    ]
+    parts = [f"{problem_counts[key]} {key}" for key in ordered if key in problem_counts]
+    return f"Issues: {', '.join(parts)}", problem_counts
+
+
 def _draw_segments(stdscr, y: int, segments: list[tuple[str, int]]) -> None:
     x = 0
     height, width = stdscr.getmaxyx()
@@ -562,6 +625,54 @@ def _draw_detail_line_at(stdscr, y: int, x: int, label: str, value: str, value_a
         if clipped:
             _safe_addstr(stdscr, y, offset, clipped, attr)
         offset += len(clipped)
+
+
+def _clip_text(value: str, width: int) -> str:
+    if width <= 0:
+        return ""
+    if len(value) <= width:
+        return value
+    if width <= 3:
+        return value[:width]
+    return f"{value[: width - 3]}..."
+
+
+def _fit_cell(value: str, width: int, align: str = "left") -> str:
+    clipped = _clip_text(str(value), width)
+    if align == "right":
+        return clipped.rjust(width)
+    if align == "center":
+        return clipped.center(width)
+    return clipped.ljust(width)
+
+
+def _draw_labeled_value_cell(
+    stdscr,
+    y: int,
+    x: int,
+    cell_width: int,
+    label: str,
+    value: str,
+    value_attr: int = 0,
+    label_width: int | None = None,
+) -> None:
+    if cell_width <= 0:
+        return
+    actual_label_width = max(0, min(label_width if label_width is not None else len(label), cell_width - 2))
+    label_text = _fit_cell(label, actual_label_width)
+    separator = ": " if cell_width > actual_label_width + 1 else ":"
+    value_width = max(0, cell_width - len(label_text) - len(separator))
+    value_text = _clip_text(value, value_width)
+    _draw_segments(
+        stdscr,
+        y,
+        [
+            (" " * x, 0) if x > 0 else ("", 0),
+            (label_text, _severity_attr("label")),
+            (separator, _severity_attr("label")),
+            (value_text, value_attr),
+        ],
+    )
 
 
 def _draw_legend(stdscr, y: int) -> int:
@@ -654,11 +765,132 @@ def _detail_value_attr(selected_meta: dict, label: str, now_dt: datetime) -> int
     return _severity_attr("muted")
 
 
-def _draw_detail_block(stdscr, start_y: int, title: str, rows: list[tuple[str, str, int]], start_x: int = 0) -> int:
+def _draw_detail_block(
+    stdscr,
+    start_y: int,
+    title: str,
+    rows: list[tuple[str, str, int]],
+    start_x: int = 0,
+    block_width: int | None = None,
+) -> int:
     _safe_addstr(stdscr, start_y, start_x, title, _color_attr(COLOR_SECTION, curses.A_BOLD))
+    label_width = max((len(label) for label, _value, _attr in rows), default=0)
+    effective_width = block_width if block_width is not None else max(20, stdscr.getmaxyx()[1] - start_x - 1)
     for idx, (label, value, value_attr) in enumerate(rows):
-        _draw_detail_line_at(stdscr, start_y + 1 + idx, start_x, label, value, value_attr)
+        _draw_labeled_value_cell(
+            stdscr,
+            start_y + 1 + idx,
+            start_x,
+            effective_width,
+            label,
+            value,
+            value_attr,
+            label_width=label_width,
+        )
     return 1 + len(rows)
+
+
+def _account_table_layout(width: int) -> list[dict[str, str | int]]:
+    if width >= 116:
+        return [
+            {"key": "marker", "title": "Sel", "width": 4, "align": "right"},
+            {"key": "name", "title": "Name", "width": 30},
+            {"key": "state", "title": "State", "width": 11},
+            {"key": "issue", "title": "Issue", "width": 7},
+            {"key": "usage", "title": "Usage", "width": 12},
+            {"key": "reset", "title": "Reset In", "width": 12},
+            {"key": "next", "title": "Next Ref", "width": 9},
+            {"key": "fail", "title": "Fail", "width": 5, "align": "right"},
+            {"key": "error", "title": "Last Error", "width": 18},
+        ]
+    if width >= 96:
+        return [
+            {"key": "marker", "title": "Sel", "width": 4, "align": "right"},
+            {"key": "name", "title": "Name", "width": 24},
+            {"key": "state", "title": "State", "width": 10},
+            {"key": "issue", "title": "Issue", "width": 7},
+            {"key": "usage", "title": "Usage", "width": 11},
+            {"key": "reset", "title": "Reset In", "width": 10},
+            {"key": "next", "title": "Next", "width": 8},
+            {"key": "fail", "title": "Fail", "width": 4, "align": "right"},
+        ]
+    return [
+        {"key": "marker", "title": "Sel", "width": 4, "align": "right"},
+        {"key": "name", "title": "Name", "width": 22},
+        {"key": "state", "title": "State", "width": 8},
+        {"key": "issue", "title": "Issue", "width": 6},
+        {"key": "usage", "title": "Usage", "width": 9},
+        {"key": "reset", "title": "Reset", "width": 8},
+        {"key": "next", "title": "Next", "width": 7},
+    ]
+
+
+def _draw_account_table_header(stdscr, y: int, layout: list[dict[str, str | int]]) -> None:
+    segments: list[tuple[str, int]] = []
+    for idx, col in enumerate(layout):
+        if idx:
+            segments.append(("  ", 0))
+        segments.append(
+            (
+                _fit_cell(str(col["title"]), int(col["width"]), str(col.get("align") or "left")),
+                _color_attr(COLOR_SECTION, curses.A_BOLD | curses.A_UNDERLINE),
+            )
+        )
+    _draw_segments(stdscr, y, segments)
+
+
+def _draw_account_row(
+    stdscr,
+    y: int,
+    meta: dict,
+    name: str,
+    selected: bool,
+    layout: list[dict[str, str | int]],
+    problem_status: str | None,
+    now_dt: datetime,
+) -> None:
+    state = meta.get("status", "standby")
+    marker = ">" if selected else ("*" if state == "active" else ".")
+    values = {
+        "marker": marker,
+        "name": name,
+        "state": state,
+        "issue": _problem_badge(problem_status),
+        "usage": _format_usage(meta),
+        "reset": _format_countdown(meta, now_dt),
+        "next": _format_next_refresh(meta, now_dt),
+        "fail": str(int(meta.get("fail_count", 0) or 0)),
+        "error": _format_last_error(meta),
+    }
+    fail_count = int(meta.get("fail_count", 0) or 0)
+    segments: list[tuple[str, int]] = []
+    for idx, col in enumerate(layout):
+        if idx:
+            segments.append(("  ", 0))
+        key = str(col["key"])
+        width = int(col["width"])
+        align = str(col.get("align") or "left")
+        attr = _severity_attr("muted", selected)
+        if key == "marker":
+            attr = _selected_marker_attr(selected)
+        elif key == "name":
+            attr = _selected_name_attr(state, selected)
+        elif key == "state":
+            attr = _state_attr(state, selected)
+        elif key == "issue":
+            attr = _problem_attr(problem_status, selected)
+        elif key == "usage":
+            attr = _usage_attr(meta, selected)
+        elif key == "reset":
+            attr = _reset_attr(meta, now_dt, selected)
+        elif key == "next":
+            attr = _next_refresh_attr(meta, now_dt, selected)
+        elif key == "fail":
+            attr = _severity_attr("bad" if fail_count > 0 else "muted", selected)
+        elif key == "error":
+            attr = _severity_attr("bad" if values["error"] != "-" else "muted", selected)
+        segments.append((_fit_cell(str(values.get(key, "-")), width, align), attr))
+    _draw_segments(stdscr, y, segments)
 
 
 def _refresh_dashboard_snapshot(paths):
@@ -1015,6 +1247,10 @@ def _dashboard(stdscr, paths) -> int:
                 else:
                     pending_auto_refresh_name = auto_target_name
 
+        verification_snapshot = verify_accounts(paths)
+        verification_accounts = verification_snapshot.get("accounts", {}) if isinstance(verification_snapshot, dict) else {}
+        problem_summary, problem_counts = _summarize_problem_counts(verification_accounts)
+
         selected_name_hint = None
         if snapshot["accounts"]:
             raw_accounts = _sorted_accounts(snapshot, sort_idx)[1]
@@ -1051,102 +1287,99 @@ def _dashboard(stdscr, paths) -> int:
 
         header_y = divider_y + 1
         _safe_addstr(stdscr, header_y, 0, "Accounts", _color_attr(COLOR_SECTION, curses.A_BOLD))
-        columns = "Sel Name                        State      Usage        Reset In     Next Ref  Fail  Last Error"
-        _safe_addstr(stdscr, header_y + 1, 0, columns, _color_attr(COLOR_SECTION, curses.A_BOLD | curses.A_UNDERLINE))
+        account_layout = _account_table_layout(width)
+        _draw_account_table_header(stdscr, header_y + 1, account_layout)
 
-        detail_start = max(header_y + 8, min(height - 9, header_y + 3 + len(accounts)))
-        list_rows = max(1, detail_start - (header_y + 2))
-        scroll_offset = 0
-        if selected_idx >= list_rows:
-            scroll_offset = selected_idx - list_rows + 1
-
+        compact_detail_mode = height <= 26
         now_dt = datetime.now(timezone.utc)
-        visible_accounts = accounts[scroll_offset : scroll_offset + list_rows]
-        for row_offset, (name, meta) in enumerate(visible_accounts):
-            y = header_y + 2 + row_offset
-            selected = scroll_offset + row_offset == selected_idx
-            state = meta.get("status", "standby")
-            usage = _format_usage(meta)
-            reset_in = _format_countdown(meta, now_dt)
-            next_refresh = _format_next_refresh(meta, now_dt)
-            fail = str(int(meta.get("fail_count", 0) or 0))
-            last_error = _format_last_error(meta)[:18]
-            fail_attr = _severity_attr("bad" if int(meta.get("fail_count", 0) or 0) > 0 else "muted", selected)
-            error_attr = _severity_attr("bad" if last_error != "-" else "muted", selected)
-            marker = ">" if selected else ("*" if state == "active" else ".")
-            _draw_segments(
-                stdscr,
-                y,
-                [
-                    (f"{marker:>3} ", _selected_marker_attr(selected)),
-                    (f"{name[:28]:28}", _selected_name_attr(state, selected)),
-                    ("  ", 0),
-                    (f"{state[:9]:9}", _state_attr(state, selected)),
-                    ("  ", 0),
-                    (f"{usage[:12]:12}", _usage_attr(meta, selected)),
-                    ("  ", 0),
-                    (f"{reset_in[:12]:12}", _reset_attr(meta, now_dt, selected)),
-                    ("  ", 0),
-                    (f"{next_refresh[:8]:8}", _next_refresh_attr(meta, now_dt, selected)),
-                    ("  ", 0),
-                    (f"{fail:4}", fail_attr),
-                    ("  ", 0),
-                    (last_error, error_attr),
-                ],
-            )
-
-        _draw_hline(stdscr, detail_start, "=")
-
+        available_width = max(20, width - 1)
+        use_two_columns = available_width >= 110 and not compact_detail_mode
         if accounts:
             selected_name, selected_meta = accounts[selected_idx]
-            overview_rows = [
-                ("Account", selected_name, _selected_name_attr(selected_meta.get("status", "standby"), True)),
-                ("Mode", f"{selected_meta.get('status', 'standby')} | {'enabled' if selected_meta.get('enabled', True) else 'disabled'}", _detail_value_attr(selected_meta, "State", now_dt)),
-                ("Health", _format_live_state(selected_meta, now_dt), _detail_value_attr(selected_meta, "Health", now_dt)),
-                ("Usage", _format_usage(selected_meta), _usage_attr(selected_meta)),
-            ]
-            left_rows = [
-                ("Identity", _format_identity(selected_meta), _detail_value_attr(selected_meta, "Identity", now_dt)),
-                ("Failures", str(int(selected_meta.get('fail_count', 0) or 0)), _detail_value_attr(selected_meta, "Failures", now_dt)),
-                ("Cooldown", selected_meta.get('cooldown_until') or '-', _detail_value_attr(selected_meta, "Cooldown Until", now_dt)),
-                ("Added", selected_meta.get('created_at') or '-', _severity_attr("muted")),
-                ("Last Check", _format_age(selected_meta.get('last_live_check_at'), now_dt), _severity_attr("info")),
-                ("Next Refresh", f"{_format_next_refresh(selected_meta, now_dt)} | {int(selected_meta.get('refresh_policy_seconds', 0) or 0)}s policy", _detail_value_attr(selected_meta, "Next Refresh", now_dt)),
-            ]
-            right_rows = [
-                ("Short Window", _format_window_summary(selected_meta, 'short', now_dt), _detail_value_attr(selected_meta, "Short Window", now_dt)),
-                ("Weekly Window", _format_window_summary(selected_meta, 'weekly', now_dt), _detail_value_attr(selected_meta, "Weekly Window", now_dt)),
-                ("Live Error", selected_meta.get('last_live_check_error') or '-', _detail_value_attr(selected_meta, "Last Live Error", now_dt)),
-                ("Last Error", _format_last_error(selected_meta), _detail_value_attr(selected_meta, "Last Error", now_dt)),
-                ("Policy", "auto on due + runtime failure", _severity_attr("info")),
-                ("Switching", f"{snapshot.get('switch_mode') or 'auto'} | {_format_switch_runtime_summary(snapshot, now_dt)}", _severity_attr("info")),
-                ("Switch Detail", _format_switch_runtime_policy(snapshot, now_dt), _severity_attr("info")),
-                ("Last Switch", _format_last_switch_event(snapshot, now_dt), _severity_attr("info")),
-            ]
+            verification = verification_accounts.get(selected_name, {}) if isinstance(verification_accounts.get(selected_name), dict) else {}
+            if compact_detail_mode:
+                overview_rows = [
+                    ("Account", selected_name, _selected_name_attr(selected_meta.get("status", "standby"), True)),
+                    ("Usage", _format_usage(selected_meta), _usage_attr(selected_meta)),
+                    ("Quota", f"{_format_window_summary(selected_meta, 'short', now_dt)} | {_format_window_summary(selected_meta, 'weekly', now_dt)}", _detail_value_attr(selected_meta, "Short Window", now_dt)),
+                    ("Problem", f"{verification.get('problem_status') or '-'} | {verification.get('recommended_action') or '-'}", _severity_attr("bad" if verification.get("problem_status") not in {None, 'ok', 'stale'} else "info")),
+                    ("Issues", problem_summary.removeprefix("Issues: "), _problem_summary_attr(problem_counts)),
+                ]
+            elif width >= 110:
+                overview_rows = [
+                    ("Account", selected_name, _selected_name_attr(selected_meta.get("status", "standby"), True)),
+                    ("Health", _format_live_state(selected_meta, now_dt), _detail_value_attr(selected_meta, "Health", now_dt)),
+                    ("Usage", _format_usage(selected_meta), _usage_attr(selected_meta)),
+                    ("Issues", problem_summary.removeprefix("Issues: "), _problem_summary_attr(problem_counts)),
+                    ("Identity", _format_identity(selected_meta), _detail_value_attr(selected_meta, "Identity", now_dt)),
+                    ("Mode", f"{selected_meta.get('status', 'standby')} | {'enabled' if selected_meta.get('enabled', True) else 'disabled'}", _detail_value_attr(selected_meta, "State", now_dt)),
+                    ("Failures", str(int(selected_meta.get('fail_count', 0) or 0)), _detail_value_attr(selected_meta, "Failures", now_dt)),
+                    ("Next Refresh", f"{_format_next_refresh(selected_meta, now_dt)} | {int(selected_meta.get('refresh_policy_seconds', 0) or 0)}s", _detail_value_attr(selected_meta, "Next Refresh", now_dt)),
+                    ("Short Window", _format_window_summary(selected_meta, 'short', now_dt), _detail_value_attr(selected_meta, "Short Window", now_dt)),
+                    ("Weekly Window", _format_window_summary(selected_meta, 'weekly', now_dt), _detail_value_attr(selected_meta, "Weekly Window", now_dt)),
+                    ("Problem", f"{verification.get('problem_status') or '-'} | {verification.get('recommended_action') or '-'}", _severity_attr("bad" if verification.get("problem_status") not in {None, 'ok', 'stale'} else "info")),
+                    ("Problem Note", verification.get('summary') or '-', _severity_attr("bad" if verification.get("problem_status") not in {None, 'ok', 'stale'} else "info")),
+                ]
+            else:
+                overview_rows = [
+                    ("Account", selected_name, _selected_name_attr(selected_meta.get("status", "standby"), True)),
+                    ("Health", _format_live_state(selected_meta, now_dt), _detail_value_attr(selected_meta, "Health", now_dt)),
+                    ("Usage", _format_usage(selected_meta), _usage_attr(selected_meta)),
+                    ("Issues", problem_summary.removeprefix("Issues: "), _problem_summary_attr(problem_counts)),
+                    ("Mode", f"{selected_meta.get('status', 'standby')} | {'enabled' if selected_meta.get('enabled', True) else 'disabled'}", _detail_value_attr(selected_meta, "State", now_dt)),
+                    ("Next Refresh", _format_next_refresh(selected_meta, now_dt), _detail_value_attr(selected_meta, "Next Refresh", now_dt)),
+                    ("Problem", f"{verification.get('problem_status') or '-'} | {verification.get('recommended_action') or '-'}", _severity_attr("bad" if verification.get("problem_status") not in {None, 'ok', 'stale'} else "info")),
+                    ("Short", _format_window_summary(selected_meta, 'short', now_dt), _detail_value_attr(selected_meta, "Short Window", now_dt)),
+                    ("Weekly", _format_window_summary(selected_meta, 'weekly', now_dt), _detail_value_attr(selected_meta, "Weekly Window", now_dt)),
+                    ("Note", verification.get('summary') or '-', _severity_attr("bad" if verification.get("problem_status") not in {None, 'ok', 'stale'} else "info")),
+                ]
         else:
             overview_rows = [
                 ("Status", "No saved accounts.", _severity_attr("muted")),
                 ("Hint", "Add one with login/import-current.", _severity_attr("info")),
+                ("Issues", "none", _severity_attr("good", bold=True)),
             ]
-            left_rows = []
-            right_rows = []
 
-        _safe_addstr(stdscr, detail_start + 1, 0, "Overview", _color_attr(COLOR_SECTION, curses.A_BOLD))
-        overview_x = 0
+        overview_panel_height = 1 + len(overview_rows)
+
+        overview_top = max(header_y + 3, (height - 2) - overview_panel_height)
+        middle_end_y = max(header_y + 2, overview_top - 1)
+        max_list_rows = max(1, middle_end_y - (header_y + 2))
+        scroll_offset = 0
+        if selected_idx >= max_list_rows:
+            scroll_offset = selected_idx - max_list_rows + 1
+
+        visible_accounts = accounts[scroll_offset : scroll_offset + max_list_rows]
+        for row_offset, (name, meta) in enumerate(visible_accounts):
+            y = header_y + 2 + row_offset
+            selected = scroll_offset + row_offset == selected_idx
+            verification = verification_accounts.get(name, {}) if isinstance(verification_accounts.get(name), dict) else {}
+            problem_status = verification.get("problem_status")
+            _draw_account_row(
+                stdscr,
+                y,
+                meta,
+                name,
+                selected,
+                account_layout,
+                problem_status,
+                now_dt,
+            )
+
+        _draw_hline(stdscr, overview_top - 1, "=")
+        _safe_addstr(stdscr, overview_top, 0, "Overview", _color_attr(COLOR_SECTION, curses.A_BOLD))
+        overview_y = overview_top + 1
         for idx, (label, value, value_attr) in enumerate(overview_rows):
-            _draw_detail_line_at(stdscr, detail_start + 2, overview_x, label, value, value_attr)
-            overview_x += max(24, len(label) + len(value) + 6)
-
-        detail_block_y = detail_start + 4
-        available_width = max(20, width - 1)
-        use_two_columns = available_width >= 110
-        if use_two_columns:
-            split_x = max(32, available_width // 2)
-            _draw_detail_block(stdscr, detail_block_y, "Account", left_rows, 0)
-            _draw_detail_block(stdscr, detail_block_y, "Quota", right_rows, split_x)
-        else:
-            used_left = _draw_detail_block(stdscr, detail_block_y, "Account", left_rows, 0)
-            _draw_detail_block(stdscr, detail_block_y + used_left + 1, "Quota", right_rows, 0)
+            _draw_labeled_value_cell(
+                stdscr,
+                overview_y + idx,
+                0,
+                max(20, width - 1),
+                label,
+                value,
+                value_attr,
+                label_width=8,
+            )
 
         _draw_hline(stdscr, height - 2, "=")
         _safe_addstr(stdscr, height - 1, 0, f"Status: {message}"[: max(0, width - 1)], _message_attr(message))
@@ -1298,6 +1531,70 @@ def print_current_account(paths, as_json: bool) -> None:
     print(active or "-")
 
 
+def print_switch_runtime(paths, as_json: bool) -> None:
+    snapshot = get_status_snapshot(paths)
+    payload = {
+        "active": snapshot.get("active"),
+        "switch_mode": snapshot.get("switch_mode", "auto"),
+        "switch_runtime": snapshot.get("switch_runtime") or {},
+    }
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    runtime = payload["switch_runtime"]
+    print(f"status: {runtime.get('status') or 'idle'}")
+    print(f"reason: {runtime.get('reason') or '-'}")
+    print(f"trigger: {runtime.get('trigger') or '-'}")
+    print(f"request_id: {runtime.get('request_id') or '-'}")
+    print(f"active: {runtime.get('active') or payload.get('active') or '-'}")
+    print(f"previous_active: {runtime.get('previous_active') or '-'}")
+    print(f"last_started_at: {runtime.get('last_started_at') or '-'}")
+    print(f"last_completed_at: {runtime.get('last_completed_at') or '-'}")
+
+
+def print_switch_history(paths, as_json: bool, limit: int) -> None:
+    snapshot = get_status_snapshot(paths)
+    history = snapshot.get("switch_history") if isinstance(snapshot.get("switch_history"), list) else []
+    limit = max(1, int(limit or 1))
+    events = history[-limit:]
+    payload = {
+        "active": snapshot.get("active"),
+        "switch_mode": snapshot.get("switch_mode", "auto"),
+        "count": len(events),
+        "events": events,
+    }
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    if not events:
+        print("no-switch-history")
+        return
+    for idx, event in enumerate(reversed(events), start=1):
+        print(
+            f"{idx}. at={event.get('at') or '-'} outcome={event.get('outcome') or '-'} "
+            f"reason={event.get('reason') or '-'} trigger={event.get('trigger') or '-'} "
+            f"from={event.get('previous_active') or '-'} to={event.get('active') or '-'} "
+            f"request_id={event.get('request_id') or '-'}"
+        )
+
+
+def print_verify_accounts(paths, as_json: bool) -> None:
+    payload = verify_accounts(paths)
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    accounts = payload.get("accounts") or {}
+    if not accounts:
+        print("no-accounts")
+        return
+    for name, info in accounts.items():
+        print(
+            f"{name}: {info.get('problem_status') or '-'} "
+            f"(action={info.get('recommended_action') or '-'}) "
+            f"- {info.get('summary') or '-'}"
+        )
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -1319,6 +1616,15 @@ def main() -> int:
                 print(json.dumps(get_status_snapshot(paths), indent=2, sort_keys=True))
             else:
                 print(format_status(paths))
+            return 0
+        if args.command == "verify-accounts":
+            print_verify_accounts(paths, args.json)
+            return 0
+        if args.command == "switch-runtime":
+            print_switch_runtime(paths, args.json)
+            return 0
+        if args.command == "switch-history":
+            print_switch_history(paths, args.json, args.limit)
             return 0
         if args.command == "current":
             print_current_account(paths, args.json)

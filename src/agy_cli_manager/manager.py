@@ -1705,6 +1705,90 @@ def _derive_health_status(paths: ManagerPaths, name: str, meta: dict) -> str:
     return "ready"
 
 
+def verify_account(paths: ManagerPaths, name: str, meta: dict) -> dict:
+    account_path = account_dir(paths, name)
+    profile_source = _resolve_profile_source(account_path)
+    source_home = _resolve_home_source(account_path)
+    enabled = bool(meta.get("enabled", True))
+    cooldown_until = parse_timestamp(meta.get("cooldown_until"))
+    has_artifacts = profile_has_login_artifacts(profile_source)
+    has_access_token = False
+    has_refresh_token = False
+    access_token_expired = False
+
+    if has_artifacts:
+        try:
+            _extract_access_token(source_home)
+            has_access_token = True
+        except ValueError:
+            has_access_token = False
+        try:
+            has_refresh_token = _has_refresh_token(source_home)
+        except ValueError:
+            has_refresh_token = False
+        try:
+            access_token_expired = _token_expiry_due(source_home)
+        except ValueError:
+            access_token_expired = False
+
+    health_status = _derive_health_status(paths, name, meta)
+    problem_status = "ok"
+    recommended_action = "none"
+    summary = "Ready for use."
+
+    if not enabled:
+        problem_status = "disabled"
+        recommended_action = "enable"
+        summary = "Account is disabled."
+    elif cooldown_until and cooldown_until > utc_now():
+        problem_status = "cooldown"
+        recommended_action = "wait"
+        summary = f"Account is in cooldown until {cooldown_until.isoformat()}."
+    elif not has_artifacts:
+        problem_status = "missing_auth"
+        recommended_action = "relogin"
+        summary = "Managed auth files are missing."
+    elif health_status == "auth_expired" or (has_access_token and access_token_expired and not has_refresh_token):
+        problem_status = "logged_out"
+        recommended_action = "relogin"
+        summary = "Access token is expired and no refresh token is available."
+    elif meta.get("last_live_check_error"):
+        problem_status = "refresh_failed"
+        recommended_action = "refresh"
+        summary = f"Last live check failed: {meta.get('last_live_check_error')}"
+    elif health_status == "stale":
+        problem_status = "stale"
+        recommended_action = "refresh"
+        summary = "Cached live status is stale; refresh is recommended."
+
+    return {
+        "name": name,
+        "problem_status": problem_status,
+        "recommended_action": recommended_action,
+        "summary": summary,
+        "health_status": health_status,
+        "enabled": enabled,
+        "has_login_artifacts": has_artifacts,
+        "has_access_token": has_access_token,
+        "has_refresh_token": has_refresh_token,
+        "access_token_expired": access_token_expired,
+        "cooldown_until": meta.get("cooldown_until"),
+        "last_live_check_error": meta.get("last_live_check_error"),
+    }
+
+
+def verify_accounts(paths: ManagerPaths) -> dict:
+    state = sync_state_from_disk(paths, load_state(paths))
+    accounts = {}
+    for name, meta in sorted(state["accounts"].items()):
+        accounts[name] = verify_account(paths, name, meta)
+    return {
+        "active": state.get("active"),
+        "switch_mode": get_switch_mode(state),
+        "accounts": accounts,
+    }
+
+
 def sync_state_from_disk(paths: ManagerPaths, state: dict) -> dict:
     disk_accounts = {p.name for p in paths.accounts_dir.iterdir() if p.is_dir()}
     tracked = state["accounts"]
