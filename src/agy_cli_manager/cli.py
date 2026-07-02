@@ -132,6 +132,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     rotate = sub.add_parser("rotate-after-failure", help="Mark the active account bad and switch to the next standby account")
     rotate.add_argument("--reason", default="manual")
+    rotate.add_argument("--trigger", default="cli")
+    rotate.add_argument("--request-id")
     rotate.add_argument("--cooldown-minutes", type=int, default=60)
     rotate.add_argument("--live-dir")
     rotate.add_argument("--force-switch", action="store_true", help="Switch even if the manager is in manual mode")
@@ -816,6 +818,36 @@ def _format_live_state(meta: dict, now: datetime) -> str:
     return health[:18]
 
 
+def _format_switch_runtime_summary(snapshot: dict, now: datetime) -> str:
+    runtime = snapshot.get("switch_runtime") if isinstance(snapshot.get("switch_runtime"), dict) else {}
+    status = str(runtime.get("status") or "idle")
+    reason = str(runtime.get("reason") or "-")
+    trigger = str(runtime.get("trigger") or "-")
+    completed = _format_age(runtime.get("last_completed_at"), now)
+    return f"{status} | {reason} | {trigger} | {completed}"[:46]
+
+
+def _format_switch_runtime_policy(snapshot: dict, now: datetime) -> str:
+    runtime = snapshot.get("switch_runtime") if isinstance(snapshot.get("switch_runtime"), dict) else {}
+    started = _format_age(runtime.get("last_started_at"), now)
+    completed = _format_age(runtime.get("last_completed_at"), now)
+    previous = str(runtime.get("previous_active") or "-")
+    request_id = str(runtime.get("request_id") or "-")
+    return f"prev={previous} | req={request_id[:12]} | done={completed}"[:52]
+
+
+def _format_last_switch_event(snapshot: dict, now: datetime) -> str:
+    history = snapshot.get("switch_history") if isinstance(snapshot.get("switch_history"), list) else []
+    if not history:
+        return "-"
+    event = history[-1] if isinstance(history[-1], dict) else {}
+    outcome = str(event.get("outcome") or "-")
+    reason = str(event.get("reason") or "-")
+    trigger = str(event.get("trigger") or "-")
+    when = _format_age(event.get("at"), now)
+    return f"{outcome} | {reason} | {trigger} | {when}"[:52]
+
+
 def _should_auto_refresh_usage(meta: dict, now: datetime) -> bool:
     if not isinstance(meta, dict):
         return False
@@ -1086,8 +1118,10 @@ def _dashboard(stdscr, paths) -> int:
                 ("Weekly Window", _format_window_summary(selected_meta, 'weekly', now_dt), _detail_value_attr(selected_meta, "Weekly Window", now_dt)),
                 ("Live Error", selected_meta.get('last_live_check_error') or '-', _detail_value_attr(selected_meta, "Last Live Error", now_dt)),
                 ("Last Error", _format_last_error(selected_meta), _detail_value_attr(selected_meta, "Last Error", now_dt)),
-                ("Policy", "auto on due + manual refresh", _severity_attr("info")),
-                ("Switching", snapshot.get("switch_mode") or "auto", _severity_attr("info")),
+                ("Policy", "auto on due + runtime failure", _severity_attr("info")),
+                ("Switching", f"{snapshot.get('switch_mode') or 'auto'} | {_format_switch_runtime_summary(snapshot, now_dt)}", _severity_attr("info")),
+                ("Switch Detail", _format_switch_runtime_policy(snapshot, now_dt), _severity_attr("info")),
+                ("Last Switch", _format_last_switch_event(snapshot, now_dt), _severity_attr("info")),
             ]
         else:
             overview_rows = [
@@ -1332,6 +1366,7 @@ def main() -> int:
             return 0
         if args.command == "ensure-active":
             result = ensure_active_account(paths, force=args.force)
+            snapshot = get_status_snapshot(paths)
             payload = {
                 "triggered": result.triggered,
                 "switch_mode": result.switch_mode,
@@ -1340,6 +1375,7 @@ def main() -> int:
                 "switched_to": result.switched_to,
                 "reason": result.reason,
                 "cooldown_minutes": result.cooldown_minutes,
+                "switch_runtime": snapshot.get("switch_runtime"),
             }
             if args.json:
                 print(json.dumps(payload, indent=2, sort_keys=True))
@@ -1544,7 +1580,10 @@ def main() -> int:
                 cooldown_minutes=args.cooldown_minutes,
                 live_dir=live_dir,
                 force_switch=args.force_switch,
+                trigger=args.trigger,
+                request_id=args.request_id,
             )
+            snapshot = get_status_snapshot(paths)
             if args.json:
                 print(json.dumps({
                     "previous_active": result.previous_active,
@@ -1553,11 +1592,16 @@ def main() -> int:
                     "marked_bad": result.marked_bad,
                     "reason": result.reason,
                     "cooldown_minutes": result.cooldown_minutes,
-                    "switch_mode": get_status_snapshot(paths).get("switch_mode", "auto"),
+                    "switch_mode": snapshot.get("switch_mode", "auto"),
+                    "outcome": result.outcome,
+                    "switch_runtime": snapshot.get("switch_runtime"),
+                    "switch_history": snapshot.get("switch_history"),
                 }, indent=2, sort_keys=True))
             else:
                 if result.previous_active and result.switched_to:
                     print(f"rotated: {result.previous_active} -> {result.switched_to}")
+                elif result.outcome == "already_switched":
+                    print(f"already-switched: {result.active or '-'}")
                 elif result.previous_active and get_status_snapshot(paths).get("switch_mode", "auto") == "manual":
                     print(f"marked-bad-manual-mode: {result.previous_active}")
                 elif result.previous_active:

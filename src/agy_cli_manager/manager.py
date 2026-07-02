@@ -37,6 +37,8 @@ DEFAULT_REFRESH_FAILURE_SWITCH_THRESHOLD = 2
 DEFAULT_SHORT_SWITCH_THRESHOLD_PERCENT = 10.0
 DEFAULT_CANDIDATE_STRATEGY = "balanced"
 VALID_CANDIDATE_STRATEGIES = ("balanced", "highest-short", "round-robin")
+DEFAULT_SWITCH_DEDUPE_SECONDS = 15
+DEFAULT_SWITCH_HISTORY_LIMIT = 20
 CODE_ASSIST_BASE_URL = "https://cloudcode-pa.googleapis.com"
 CODE_ASSIST_USER_AGENT = "antigravity"
 CODE_ASSIST_LOAD_PATH = "/v1internal:loadCodeAssist"
@@ -62,6 +64,7 @@ class RotationResult:
     marked_bad: bool
     reason: str | None
     cooldown_minutes: int
+    outcome: str = "unknown"
 
 
 @dataclass
@@ -151,6 +154,8 @@ def ensure_layout(paths: ManagerPaths) -> None:
                 "live_dir": str(default_live_dir()),
                 "switch_mode": DEFAULT_SWITCH_MODE,
                 "switch_policy": _default_switch_policy(),
+                "switch_runtime": _default_switch_runtime(),
+                "switch_history": [],
             },
         )
 
@@ -183,6 +188,8 @@ def load_state(paths: ManagerPaths) -> dict:
     data.setdefault("live_dir", str(default_live_dir()))
     data["switch_mode"] = _normalize_switch_mode(data.get("switch_mode"))
     data["switch_policy"] = _normalize_switch_policy(data.get("switch_policy"))
+    data["switch_runtime"] = _normalize_switch_runtime(data.get("switch_runtime"))
+    data["switch_history"] = _normalize_switch_history(data.get("switch_history"))
     if data.get("live_dir") is None:
         data["live_dir"] = str(default_live_dir())
     return data
@@ -247,6 +254,113 @@ def _normalize_switch_policy(raw: object) -> dict:
 
 def _state_switch_policy(state: dict) -> dict:
     return _normalize_switch_policy(state.get("switch_policy"))
+
+
+def _default_switch_runtime() -> dict:
+    return {
+        "status": "idle",
+        "reason": None,
+        "trigger": None,
+        "request_id": None,
+        "active": None,
+        "previous_active": None,
+        "last_started_at": None,
+        "last_completed_at": None,
+    }
+
+
+def _normalize_switch_runtime(raw: object) -> dict:
+    runtime = _default_switch_runtime()
+    if isinstance(raw, dict):
+        for key in runtime:
+            runtime[key] = raw.get(key)
+    status = str(runtime.get("status") or "idle").strip().lower()
+    if status not in {"idle", "switching", "ready", "no_account"}:
+        status = "idle"
+    runtime["status"] = status
+    for key in ("reason", "trigger", "request_id", "active", "previous_active", "last_started_at", "last_completed_at"):
+        value = runtime.get(key)
+        runtime[key] = value if isinstance(value, str) or value is None else str(value)
+    return runtime
+
+
+def _mark_switch_runtime(
+    state: dict,
+    *,
+    status: str,
+    reason: str | None = None,
+    trigger: str | None = None,
+    request_id: str | None = None,
+    active: str | None = None,
+    previous_active: str | None = None,
+    started_at: str | None = None,
+    completed_at: str | None = None,
+) -> None:
+    runtime = _normalize_switch_runtime(state.get("switch_runtime"))
+    runtime["status"] = status
+    runtime["reason"] = reason
+    runtime["trigger"] = trigger
+    runtime["request_id"] = request_id
+    runtime["active"] = active
+    runtime["previous_active"] = previous_active
+    if started_at is not None:
+        runtime["last_started_at"] = started_at
+    if completed_at is not None:
+        runtime["last_completed_at"] = completed_at
+    state["switch_runtime"] = runtime
+
+
+def _normalize_switch_history(raw: object) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    entries: list[dict] = []
+    for item in raw[-DEFAULT_SWITCH_HISTORY_LIMIT:]:
+        if not isinstance(item, dict):
+            continue
+        entries.append(
+            {
+                "at": item.get("at") if isinstance(item.get("at"), str) or item.get("at") is None else str(item.get("at")),
+                "reason": item.get("reason") if isinstance(item.get("reason"), str) or item.get("reason") is None else str(item.get("reason")),
+                "trigger": item.get("trigger") if isinstance(item.get("trigger"), str) or item.get("trigger") is None else str(item.get("trigger")),
+                "request_id": item.get("request_id") if isinstance(item.get("request_id"), str) or item.get("request_id") is None else str(item.get("request_id")),
+                "previous_active": item.get("previous_active") if isinstance(item.get("previous_active"), str) or item.get("previous_active") is None else str(item.get("previous_active")),
+                "active": item.get("active") if isinstance(item.get("active"), str) or item.get("active") is None else str(item.get("active")),
+                "switched_to": item.get("switched_to") if isinstance(item.get("switched_to"), str) or item.get("switched_to") is None else str(item.get("switched_to")),
+                "outcome": item.get("outcome") if isinstance(item.get("outcome"), str) or item.get("outcome") is None else str(item.get("outcome")),
+                "cooldown_minutes": int(item.get("cooldown_minutes", 0) or 0),
+            }
+        )
+    return entries
+
+
+def _append_switch_history(
+    state: dict,
+    *,
+    reason: str | None,
+    trigger: str | None,
+    request_id: str | None,
+    previous_active: str | None,
+    active: str | None,
+    switched_to: str | None,
+    outcome: str | None,
+    cooldown_minutes: int,
+    at: str | None = None,
+) -> None:
+    history = _normalize_switch_history(state.get("switch_history"))
+    history.append(
+        {
+            "at": at or utc_now().isoformat(),
+            "reason": reason,
+            "trigger": trigger,
+            "request_id": request_id,
+            "previous_active": previous_active,
+            "active": active,
+            "switched_to": switched_to,
+            "outcome": outcome,
+            "cooldown_minutes": int(cooldown_minutes or 0),
+        }
+    )
+    state["switch_history"] = history[-DEFAULT_SWITCH_HISTORY_LIMIT:]
 
 
 def account_dir(paths: ManagerPaths, name: str) -> Path:
@@ -1823,6 +1937,8 @@ def get_status_snapshot(paths: ManagerPaths) -> dict:
         "active": state.get("active"),
         "switch_mode": get_switch_mode(state),
         "switch_policy": _state_switch_policy(state),
+        "switch_runtime": _normalize_switch_runtime(state.get("switch_runtime")),
+        "switch_history": _normalize_switch_history(state.get("switch_history")),
         "accounts": snapshot_accounts,
     }
 
@@ -2008,6 +2124,9 @@ def rotate_after_failure(
     cooldown_minutes: int = 60,
     live_dir: Path | None = None,
     force_switch: bool = False,
+    dedupe_seconds: int = DEFAULT_SWITCH_DEDUPE_SECONDS,
+    trigger: str = "unknown",
+    request_id: str | None = None,
 ) -> RotationResult:
     if cooldown_minutes < 0:
         raise ValueError("Cooldown minutes must be non-negative.")
@@ -2017,9 +2136,87 @@ def rotate_after_failure(
         if live_dir is not None:
             state["live_dir"] = str(live_dir.resolve())
         switch_mode = get_switch_mode(state)
+        runtime = _normalize_switch_runtime(state.get("switch_runtime"))
+        now = utc_now()
+        now_iso = now.isoformat()
+
+        last_completed_at = parse_timestamp(runtime.get("last_completed_at"))
+        if (
+            runtime.get("status") == "ready"
+            and runtime.get("reason") == reason
+            and last_completed_at is not None
+            and (now - last_completed_at).total_seconds() <= dedupe_seconds
+            and state.get("active")
+        ):
+            _mark_switch_runtime(
+                state,
+                status="ready",
+                reason=reason,
+                trigger=trigger,
+                request_id=request_id,
+                active=state.get("active"),
+                previous_active=runtime.get("previous_active"),
+                started_at=runtime.get("last_started_at"),
+                completed_at=runtime.get("last_completed_at"),
+            )
+            _append_switch_history(
+                state,
+                reason=reason,
+                trigger=trigger,
+                request_id=request_id,
+                previous_active=runtime.get("previous_active"),
+                active=state.get("active"),
+                switched_to=None,
+                outcome="already_switched",
+                cooldown_minutes=0,
+                at=runtime.get("last_completed_at"),
+            )
+            save_state(paths, state)
+            return RotationResult(
+                previous_active=runtime.get("previous_active"),
+                active=state.get("active"),
+                switched_to=None,
+                marked_bad=False,
+                reason=reason,
+                cooldown_minutes=0,
+                outcome="already_switched",
+            )
 
         previous = state.get("active")
+        _mark_switch_runtime(
+            state,
+            status="switching",
+            reason=reason,
+            trigger=trigger,
+            request_id=request_id,
+            active=previous,
+            previous_active=previous,
+            started_at=now_iso,
+            completed_at=None,
+        )
+        save_state(paths, state)
         if not previous:
+            _mark_switch_runtime(
+                state,
+                status="no_account",
+                reason=reason,
+                trigger=trigger,
+                request_id=request_id,
+                active=None,
+                previous_active=None,
+                completed_at=utc_now().isoformat(),
+            )
+            _append_switch_history(
+                state,
+                reason=reason,
+                trigger=trigger,
+                request_id=request_id,
+                previous_active=None,
+                active=None,
+                switched_to=None,
+                outcome="no_active",
+                cooldown_minutes=cooldown_minutes,
+            )
             save_state(paths, state)
             return RotationResult(
                 previous_active=None,
@@ -2028,11 +2225,33 @@ def rotate_after_failure(
                 marked_bad=False,
                 reason=reason,
                 cooldown_minutes=cooldown_minutes,
+                outcome="no_active",
             )
 
         meta = state["accounts"].get(previous)
         if meta is None:
             state["active"] = None
+            _mark_switch_runtime(
+                state,
+                status="no_account",
+                reason=reason,
+                trigger=trigger,
+                request_id=request_id,
+                active=None,
+                previous_active=previous,
+                completed_at=utc_now().isoformat(),
+            )
+            _append_switch_history(
+                state,
+                reason=reason,
+                trigger=trigger,
+                request_id=request_id,
+                previous_active=previous,
+                active=None,
+                switched_to=None,
+                outcome="active_missing",
+                cooldown_minutes=cooldown_minutes,
+            )
             save_state(paths, state)
             return RotationResult(
                 previous_active=previous,
@@ -2041,6 +2260,7 @@ def rotate_after_failure(
                 marked_bad=False,
                 reason=reason,
                 cooldown_minutes=cooldown_minutes,
+                outcome="active_missing",
             )
 
         meta["last_error"] = reason
@@ -2061,6 +2281,27 @@ def rotate_after_failure(
                 state = sync_state_from_disk(paths, state)
                 _sync_runtime_to_live_dir(paths, state)
 
+        _mark_switch_runtime(
+            state,
+            status="ready" if state.get("active") else "no_account",
+            reason=reason,
+            trigger=trigger,
+            request_id=request_id,
+            active=state.get("active"),
+            previous_active=previous,
+            completed_at=utc_now().isoformat(),
+        )
+        _append_switch_history(
+            state,
+            reason=reason,
+            trigger=trigger,
+            request_id=request_id,
+            previous_active=previous,
+            active=state.get("active"),
+            switched_to=switched_to,
+            outcome="switched" if switched_to else "no_candidate",
+            cooldown_minutes=cooldown_minutes,
+        )
         save_state(paths, state)
         return RotationResult(
             previous_active=previous,
@@ -2069,6 +2310,7 @@ def rotate_after_failure(
             marked_bad=True,
             reason=reason,
             cooldown_minutes=cooldown_minutes,
+            outcome="switched" if switched_to else "no_candidate",
         )
 
 
@@ -2162,6 +2404,8 @@ def login_account(
 def format_status(paths: ManagerPaths) -> str:
     state = sync_state_from_disk(paths, load_state(paths))
     save_state(paths, state)
+    switch_runtime = _normalize_switch_runtime(state.get("switch_runtime"))
+    switch_history = _normalize_switch_history(state.get("switch_history"))
     lines = [
         f"root: {paths.root}",
         f"runtime: {paths.runtime_dir}",
@@ -2169,6 +2413,21 @@ def format_status(paths: ManagerPaths) -> str:
         f"live_dir: {state.get('live_dir') or '-'}",
         f"active: {state.get('active') or '-'}",
         f"switch_mode: {get_switch_mode(state)}",
+        (
+            "switch_runtime: "
+            f"{switch_runtime.get('status') or 'idle'}"
+            f" reason={switch_runtime.get('reason') or '-'}"
+            f" trigger={switch_runtime.get('trigger') or '-'}"
+            f" active={switch_runtime.get('active') or '-'}"
+            f" previous={switch_runtime.get('previous_active') or '-'}"
+        ),
+        (
+            "last_switch: "
+            f"{(switch_history[-1].get('outcome') if switch_history else '-')}"
+            f" reason={(switch_history[-1].get('reason') if switch_history else '-')}"
+            f" trigger={(switch_history[-1].get('trigger') if switch_history else '-')}"
+            f" at={(switch_history[-1].get('at') if switch_history else '-')}"
+        ),
         "accounts:",
     ]
     for name, meta in sorted(state["accounts"].items()):
