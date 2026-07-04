@@ -21,10 +21,12 @@ from agy_cli_manager.manager import (
     ensure_layout,
     format_status,
     get_account_identity,
+    get_account_proxy,
     get_live_dir,
     pick_due_refresh_account,
     get_status_snapshot,
     import_current,
+    list_account_proxies,
     list_models,
     login_account,
     load_state,
@@ -34,7 +36,9 @@ from agy_cli_manager.manager import (
     refresh_due_account,
     refresh_account_identity,
     rotate_after_failure,
+    clear_account_proxy,
     set_live_dir,
+    set_account_proxy,
     set_enabled,
     set_switch_mode,
     switch_account,
@@ -52,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("init", help="Create initial manager layout")
     sub.add_parser("dashboard", help="Open the full-screen dashboard")
+    sub.add_parser("proxy-dashboard", help="Open the proxy dashboard")
     sub.add_parser("menu", help="Open the interactive menu")
     status = sub.add_parser("status", help="Show current manager status")
     status.add_argument("--json", action="store_true", help="Print machine-readable JSON")
@@ -66,6 +71,20 @@ def build_parser() -> argparse.ArgumentParser:
     current.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     list_cmd = sub.add_parser("list", help="List saved accounts")
     list_cmd.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    proxy_list = sub.add_parser("proxy-list", help="List per-account proxy metadata")
+    proxy_list.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    proxy_show = sub.add_parser("proxy-show", help="Show proxy metadata for the active or named account")
+    proxy_show.add_argument("name", nargs="?")
+    proxy_show.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    proxy_set = sub.add_parser("proxy-set", help="Set proxy metadata for an account")
+    proxy_set.add_argument("name")
+    proxy_set.add_argument("url")
+    proxy_set.add_argument("--label")
+    proxy_set.add_argument("--disabled", action="store_true", help="Save proxy metadata but keep it disabled")
+    proxy_set.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    proxy_clear = sub.add_parser("proxy-clear", help="Clear proxy metadata for an account")
+    proxy_clear.add_argument("name")
+    proxy_clear.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     sub.add_parser("apply-active", help="Re-apply the current active account to runtime and live_dir")
     ensure_cmd = sub.add_parser("ensure-active", help="Evaluate switch policy and ensure there is a usable active account")
     ensure_cmd.add_argument("--force", action="store_true", help="Apply the policy even when switch mode is manual")
@@ -224,6 +243,9 @@ def run_menu(paths, parser: argparse.ArgumentParser) -> int:
         print("12. Set switch mode")
         print("13. Ensure active")
         print("14. Set switch policy")
+        print("15. Show account proxy")
+        print("16. Set account proxy")
+        print("17. Clear account proxy")
         print("0. Exit")
 
         choice = input("Select: ").strip()
@@ -312,6 +334,24 @@ def run_menu(paths, parser: argparse.ArgumentParser) -> int:
                     candidate_strategy=strategy_raw or None,
                 )
                 print(json.dumps(policy, indent=2, sort_keys=True))
+            elif choice == "15":
+                name_raw = input("Account name (leave empty for active): ").strip()
+                resolved_name, proxy = get_account_proxy(paths, name_raw or None)
+                print(f"account: {resolved_name}")
+                print(f"proxy_enabled: {proxy.get('enabled', False)}")
+                print(f"proxy_label: {proxy.get('label') or '-'}")
+                print(f"proxy_url: {proxy.get('url') or '-'}")
+            elif choice == "16":
+                name = prompt_nonempty("Account name")
+                url = prompt_nonempty("Proxy URL")
+                label = prompt_optional_text("Proxy label")
+                enabled_raw = input("Enable now? [Y/n]: ").strip().lower()
+                payload = set_account_proxy(paths, name, url=url, label=label, enabled=enabled_raw not in {"n", "no"})
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            elif choice == "17":
+                name = prompt_nonempty("Account name")
+                clear_account_proxy(paths, name)
+                print(f"proxy-cleared: {name}")
             elif choice == "0":
                 return 0
             else:
@@ -702,6 +742,7 @@ def _draw_action_bar(stdscr, y: int) -> int:
     actions = [
         ("N", "Login"),
         ("I", "Import"),
+        ("P", "Proxies"),
         ("Enter/A", "Activate"),
         ("R", "Rotate"),
         ("E", "Enable/Disable"),
@@ -891,6 +932,24 @@ def _draw_account_row(
             attr = _severity_attr("bad" if values["error"] != "-" else "muted", selected)
         segments.append((_fit_cell(str(values.get(key, "-")), width, align), attr))
     _draw_segments(stdscr, y, segments)
+
+
+def _format_proxy_brief(proxy: dict | None) -> str:
+    if not isinstance(proxy, dict):
+        return "-"
+    if not proxy.get("url"):
+        return "-"
+    label = proxy.get("label")
+    state = "on" if proxy.get("enabled") else "off"
+    return f"{label or proxy.get('url')} ({state})"
+
+
+def _proxy_state_attr(proxy: dict | None, selected: bool = False) -> int:
+    if not isinstance(proxy, dict) or not proxy.get("url"):
+        return _severity_attr("muted", selected)
+    if proxy.get("enabled"):
+        return _severity_attr("good", selected, bold=True)
+    return _severity_attr("warn", selected, bold=True)
 
 
 def _refresh_dashboard_snapshot(paths):
@@ -1192,6 +1251,98 @@ def _dashboard_import(paths) -> str:
     return f"imported-current: {name}"
 
 
+def _proxy_dashboard(stdscr, paths) -> int:
+    _init_dashboard_colors()
+    curses.curs_set(0)
+    stdscr.nodelay(True)
+    stdscr.keypad(True)
+    selected_idx = 0
+    message = "Proxy metadata only. Runtime proxy wiring is not enabled."
+
+    while True:
+        payload = list_account_proxies(paths)
+        accounts_map = payload.get("accounts", {}) if isinstance(payload, dict) else {}
+        names = sorted(accounts_map)
+        if selected_idx >= len(names):
+            selected_idx = max(0, len(names) - 1)
+
+        stdscr.erase()
+        height, width = stdscr.getmaxyx()
+        _draw_wrapped_lines(
+            stdscr,
+            0,
+            f"Proxy Dashboard | Accounts: {len(names)} | Active: {payload.get('active') or '-'}",
+            _color_attr(COLOR_HEADER, curses.A_BOLD),
+        )
+        _draw_segments(
+            stdscr,
+            1,
+            [
+                ("Keys: ", _severity_attr("label")),
+                ("Up/Down", _severity_attr("selected", bold=True)),
+                (" move  ", 0),
+                ("Q", _severity_attr("selected", bold=True)),
+                (" back", 0),
+            ],
+        )
+        _draw_hline(stdscr, 2, "=")
+        _safe_addstr(stdscr, 3, 0, "Proxies", _color_attr(COLOR_SECTION, curses.A_BOLD))
+        header = " Sel  Name                          State      Proxy   Label                URL"
+        _safe_addstr(stdscr, 4, 0, header[: max(0, width - 1)], _color_attr(COLOR_SECTION, curses.A_BOLD | curses.A_UNDERLINE))
+
+        list_start = 5
+        list_rows = max(1, height - list_start - 2)
+        scroll_offset = 0
+        if selected_idx >= list_rows:
+            scroll_offset = selected_idx - list_rows + 1
+
+        for row_offset, name in enumerate(names[scroll_offset : scroll_offset + list_rows]):
+            meta = accounts_map.get(name, {})
+            proxy = meta.get("proxy") if isinstance(meta.get("proxy"), dict) else {}
+            state = str(meta.get("status") or "standby")
+            selected = scroll_offset + row_offset == selected_idx
+            marker = ">" if selected else ("*" if meta.get("active") else ".")
+            proxy_state = "on" if proxy.get("enabled") and proxy.get("url") else ("saved" if proxy.get("url") else "-")
+            label = proxy.get("label") or "-"
+            url = proxy.get("url") or "-"
+            _draw_segments(
+                stdscr,
+                list_start + row_offset,
+                [
+                    (f"{marker:>4} ", _selected_marker_attr(selected)),
+                    (f"{_fit_cell(name, 28):28}", _selected_name_attr(state, selected)),
+                    ("  ", 0),
+                    (f"{_fit_cell(state, 10):10}", _state_attr(state, selected)),
+                    ("  ", 0),
+                    (f"{_fit_cell(proxy_state, 7):7}", _proxy_state_attr(proxy, selected)),
+                    ("  ", 0),
+                    (f"{_fit_cell(label, 20):20}", _proxy_state_attr(proxy, selected)),
+                    ("  ", 0),
+                    (_clip_text(url, max(0, width - 78)), _severity_attr("info" if url != "-" else "muted", selected)),
+                ],
+            )
+
+        _draw_hline(stdscr, height - 2, "=")
+        _safe_addstr(stdscr, height - 1, 0, f"Status: {message}"[: max(0, width - 1)], _message_attr(message))
+        stdscr.refresh()
+
+        try:
+            key = stdscr.getch()
+        except KeyboardInterrupt:
+            return 130
+        if key == -1:
+            time.sleep(0.1)
+            continue
+        if key in (ord("q"), ord("Q")):
+            return 0
+        if key in (curses.KEY_UP, ord("k"), ord("K")) and selected_idx > 0:
+            selected_idx -= 1
+            continue
+        if key in (curses.KEY_DOWN, ord("j"), ord("J")) and selected_idx < max(0, len(names) - 1):
+            selected_idx += 1
+            continue
+
+
 def _dashboard(stdscr, paths) -> int:
     _init_dashboard_colors()
     curses.curs_set(0)
@@ -1440,6 +1591,8 @@ def _dashboard(stdscr, paths) -> int:
             snapshot = _refresh_dashboard_snapshot(paths)
             last_refresh = time.time()
             continue
+        if key in (ord("p"), ord("P")):
+            return _proxy_dashboard(stdscr, paths)
         if not accounts:
             message = "No accounts available for this action."
             continue
@@ -1493,6 +1646,13 @@ def run_dashboard(paths) -> int:
     return curses.wrapper(_dashboard, paths)
 
 
+def run_proxy_dashboard(paths) -> int:
+    ensure_layout(paths)
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise ValueError("Proxy dashboard requires an interactive TTY.")
+    return curses.wrapper(_proxy_dashboard, paths)
+
+
 def print_account_list(paths, as_json: bool) -> None:
     snapshot = get_status_snapshot(paths)
     accounts = []
@@ -1507,6 +1667,7 @@ def print_account_list(paths, as_json: bool) -> None:
                 "cooldown_until": meta.get("cooldown_until"),
                 "fail_count": int(meta.get("fail_count", 0) or 0),
                 "refresh_fail_count": int(meta.get("refresh_fail_count", 0) or 0),
+                "proxy": meta.get("proxy"),
             }
         )
     if as_json:
@@ -1519,7 +1680,7 @@ def print_account_list(paths, as_json: bool) -> None:
         marker = "*" if entry["name"] == snapshot.get("active") else "-"
         status = entry["status"] or "standby"
         enabled = "enabled" if entry["enabled"] else "disabled"
-        print(f"{marker} {entry['name']} [{status}, {enabled}]")
+        print(f"{marker} {entry['name']} [{status}, {enabled}] proxy={_format_proxy_brief(entry.get('proxy'))}")
 
 
 def print_current_account(paths, as_json: bool) -> None:
@@ -1595,6 +1756,38 @@ def print_verify_accounts(paths, as_json: bool) -> None:
         )
 
 
+def print_proxy_list(paths, as_json: bool) -> None:
+    payload = list_account_proxies(paths)
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    accounts = payload.get("accounts") or {}
+    if not accounts:
+        print("no-accounts")
+        return
+    for name, meta in accounts.items():
+        marker = "*" if meta.get("active") else "-"
+        proxy = meta.get("proxy") if isinstance(meta.get("proxy"), dict) else {}
+        print(
+            f"{marker} {name} "
+            f"proxy={'on' if proxy.get('enabled') and proxy.get('url') else ('saved' if proxy.get('url') else '-')}"
+            f" label={proxy.get('label') or '-'}"
+            f" url={proxy.get('url') or '-'}"
+        )
+
+
+def print_proxy_show(paths, name: str | None, as_json: bool) -> None:
+    resolved_name, proxy = get_account_proxy(paths, name)
+    payload = {"account": resolved_name, "proxy": proxy}
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    print(f"account: {resolved_name}")
+    print(f"proxy_enabled: {proxy.get('enabled', False)}")
+    print(f"proxy_label: {proxy.get('label') or '-'}")
+    print(f"proxy_url: {proxy.get('url') or '-'}")
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -1605,6 +1798,8 @@ def main() -> int:
             return run_dashboard(paths)
         if args.command == "dashboard":
             return run_dashboard(paths)
+        if args.command == "proxy-dashboard":
+            return run_proxy_dashboard(paths)
         if args.command == "menu":
             return run_menu(paths, parser)
         if args.command == "init":
@@ -1631,6 +1826,39 @@ def main() -> int:
             return 0
         if args.command == "list":
             print_account_list(paths, args.json)
+            return 0
+        if args.command == "proxy-list":
+            print_proxy_list(paths, args.json)
+            return 0
+        if args.command == "proxy-show":
+            print_proxy_show(paths, args.name, args.json)
+            return 0
+        if args.command == "proxy-set":
+            payload = set_account_proxy(
+                paths,
+                args.name,
+                url=args.url,
+                label=args.label,
+                enabled=not args.disabled,
+            )
+            result = {"account": args.name, "proxy": payload}
+            if args.json:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                print(
+                    f"proxy-set: {args.name} "
+                    f"label={payload.get('label') or '-'} "
+                    f"url={payload.get('url') or '-'} "
+                    f"enabled={payload.get('enabled', False)}"
+                )
+            return 0
+        if args.command == "proxy-clear":
+            clear_account_proxy(paths, args.name)
+            result = {"account": args.name, "proxy": {"enabled": False, "label": None, "url": None}}
+            if args.json:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                print(f"proxy-cleared: {args.name}")
             return 0
         if args.command == "whoami":
             if args.refresh and args.name:

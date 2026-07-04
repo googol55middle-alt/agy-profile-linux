@@ -256,6 +256,27 @@ def _state_switch_policy(state: dict) -> dict:
     return _normalize_switch_policy(state.get("switch_policy"))
 
 
+def _default_proxy_config() -> dict:
+    return {
+        "enabled": False,
+        "url": None,
+        "label": None,
+    }
+
+
+def _normalize_proxy_config(raw: object) -> dict:
+    proxy = _default_proxy_config()
+    if isinstance(raw, dict):
+        proxy["enabled"] = bool(raw.get("enabled", False))
+        url = raw.get("url")
+        label = raw.get("label")
+        proxy["url"] = str(url).strip() or None if isinstance(url, str) else None
+        proxy["label"] = str(label).strip() or None if isinstance(label, str) else None
+    if not proxy["url"]:
+        proxy["enabled"] = False
+    return proxy
+
+
 def _default_switch_runtime() -> dict:
     return {
         "status": "idle",
@@ -1774,6 +1795,7 @@ def verify_account(paths: ManagerPaths, name: str, meta: dict) -> dict:
         "access_token_expired": access_token_expired,
         "cooldown_until": meta.get("cooldown_until"),
         "last_live_check_error": meta.get("last_live_check_error"),
+        "proxy": _normalize_proxy_config(meta.get("proxy")),
     }
 
 
@@ -1818,6 +1840,7 @@ def sync_state_from_disk(paths: ManagerPaths, state: dict) -> dict:
                 "refresh_fail_count": 0,
                 "next_live_check_at": None,
                 "refresh_policy_seconds": DEFAULT_REFRESH_POLICY_SECONDS,
+                "proxy": _default_proxy_config(),
             },
         )
         meta = tracked[name]
@@ -1829,6 +1852,7 @@ def sync_state_from_disk(paths: ManagerPaths, state: dict) -> dict:
         meta.setdefault("refresh_fail_count", 0)
         meta.setdefault("next_live_check_at", None)
         meta.setdefault("refresh_policy_seconds", DEFAULT_REFRESH_POLICY_SECONDS)
+        meta["proxy"] = _normalize_proxy_config(meta.get("proxy"))
         _sync_legacy_usage_fields(meta)
     for name in list(tracked):
         if name not in disk_accounts:
@@ -1898,6 +1922,7 @@ def save_account_profile(paths: ManagerPaths, name: str, source_dir: Path, overw
             "next_live_check_at": previous_meta.get("next_live_check_at"),
             "refresh_policy_seconds": int(previous_meta.get("refresh_policy_seconds", DEFAULT_REFRESH_POLICY_SECONDS) or DEFAULT_REFRESH_POLICY_SECONDS),
             "identity": identity,
+            "proxy": _normalize_proxy_config(previous_meta.get("proxy")),
         }
         _sync_legacy_usage_fields(state["accounts"][name])
         if overwrite and state.get("active") == name:
@@ -2012,13 +2037,17 @@ def get_status_snapshot(paths: ManagerPaths) -> dict:
             "next_live_check_at": meta.get("next_live_check_at"),
             "refresh_policy_seconds": int(meta.get("refresh_policy_seconds", DEFAULT_REFRESH_POLICY_SECONDS) or DEFAULT_REFRESH_POLICY_SECONDS),
             "identity": meta.get("identity") if isinstance(meta.get("identity"), dict) else None,
+            "proxy": _normalize_proxy_config(meta.get("proxy")),
         }
+    active_name = state.get("active")
+    active_meta = state["accounts"].get(active_name) if active_name else None
     return {
         "root": str(paths.root),
         "runtime_dir": str(paths.runtime_dir),
         "lock_file": str(paths.lock_file),
         "live_dir": state.get("live_dir"),
-        "active": state.get("active"),
+        "active": active_name,
+        "active_proxy": _normalize_proxy_config(active_meta.get("proxy")) if isinstance(active_meta, dict) else _default_proxy_config(),
         "switch_mode": get_switch_mode(state),
         "switch_policy": _state_switch_policy(state),
         "switch_runtime": _normalize_switch_runtime(state.get("switch_runtime")),
@@ -2030,6 +2059,70 @@ def get_status_snapshot(paths: ManagerPaths) -> dict:
 def get_switch_policy(paths: ManagerPaths) -> dict:
     state = sync_state_from_disk(paths, load_state(paths))
     return dict(_state_switch_policy(state))
+
+
+def get_account_proxy(paths: ManagerPaths, name: str | None = None) -> tuple[str, dict]:
+    state = sync_state_from_disk(paths, load_state(paths))
+    resolved_name = name or state.get("active")
+    if not resolved_name:
+        raise ValueError("No active account.")
+    meta = state["accounts"].get(resolved_name)
+    if meta is None:
+        raise ValueError(f"Unknown account: {resolved_name}")
+    return resolved_name, _normalize_proxy_config(meta.get("proxy"))
+
+
+def list_account_proxies(paths: ManagerPaths) -> dict:
+    state = sync_state_from_disk(paths, load_state(paths))
+    accounts = {}
+    for name, meta in sorted(state["accounts"].items()):
+        accounts[name] = {
+            "active": name == state.get("active"),
+            "status": meta.get("status", "standby"),
+            "enabled": bool(meta.get("enabled", True)),
+            "proxy": _normalize_proxy_config(meta.get("proxy")),
+        }
+    return {
+        "active": state.get("active"),
+        "accounts": accounts,
+    }
+
+
+def set_account_proxy(
+    paths: ManagerPaths,
+    name: str,
+    *,
+    url: str,
+    label: str | None = None,
+    enabled: bool = True,
+) -> dict:
+    proxy_url = str(url).strip()
+    if not proxy_url:
+        raise ValueError("Proxy URL cannot be empty.")
+    with manager_lock(paths):
+        state = sync_state_from_disk(paths, load_state(paths))
+        meta = state["accounts"].get(name)
+        if meta is None:
+            raise ValueError(f"Unknown account: {name}")
+        meta["proxy"] = _normalize_proxy_config(
+            {
+                "enabled": enabled,
+                "url": proxy_url,
+                "label": label,
+            }
+        )
+        save_state(paths, state)
+        return dict(meta["proxy"])
+
+
+def clear_account_proxy(paths: ManagerPaths, name: str) -> None:
+    with manager_lock(paths):
+        state = sync_state_from_disk(paths, load_state(paths))
+        meta = state["accounts"].get(name)
+        if meta is None:
+            raise ValueError(f"Unknown account: {name}")
+        meta["proxy"] = _default_proxy_config()
+        save_state(paths, state)
 
 
 def set_switch_mode(paths: ManagerPaths, mode: str) -> str:
@@ -2496,6 +2589,7 @@ def format_status(paths: ManagerPaths) -> str:
         f"lock: {paths.lock_file}",
         f"live_dir: {state.get('live_dir') or '-'}",
         f"active: {state.get('active') or '-'}",
+        f"active_proxy: {_normalize_proxy_config(state['accounts'].get(state.get('active'), {}).get('proxy') if state.get('active') else None).get('label') or (_normalize_proxy_config(state['accounts'].get(state.get('active'), {}).get('proxy') if state.get('active') else None).get('url') or '-')}",
         f"switch_mode: {get_switch_mode(state)}",
         (
             "switch_runtime: "
@@ -2530,6 +2624,10 @@ def format_status(paths: ManagerPaths) -> str:
             extra.append(f"refresh_fail_count={meta['refresh_fail_count']}")
         if meta.get("last_error"):
             extra.append(f"last_error={meta['last_error']}")
+        proxy = _normalize_proxy_config(meta.get("proxy"))
+        if proxy.get("url"):
+            extra.append(f"proxy_label={proxy.get('label') or '-'}")
+            extra.append(f"proxy_enabled={proxy.get('enabled', False)}")
         suffix = f" [{' ; '.join(extra)}]" if extra else ""
         lines.append(f"  - {name}: {meta.get('status', 'standby')} ({flag}){suffix}")
     if not state["accounts"]:
