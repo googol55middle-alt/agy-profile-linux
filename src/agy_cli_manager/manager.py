@@ -2559,7 +2559,10 @@ def login_account(
 
     identity = resolve_login_profile_identity(live_dir, agy_binary=resolved_binary, live_dir=live_dir)
     detected_name = identity.get("account_name")
-    storage_name = normalize_account_storage_name(detected_name or name)
+    # The caller's name is the stable profile label.  Keep detected identity
+    # as metadata so two profiles from the same or changing login identity do
+    # not collapse onto one storage directory.
+    storage_name = normalize_account_storage_name(name)
     if detected_name and storage_name != name:
         print(f"detected-account: {detected_name}")
         print(f"storage-name: {storage_name}")
