@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.1 - 2026-07-15
+
+- preserve the explicit profile name supplied during login
+
 ## v0.2.0 - 2026-07-01
 
 - add account model discovery via Python API and `agy-cli-manager models --json`
