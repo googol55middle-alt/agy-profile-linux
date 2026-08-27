@@ -2,6 +2,10 @@
 
 `agy-profile-linux` is an independent Linux fork based on upstream 0.2.1. It is not affiliated with the upstream maintainers, Google, or Antigravity.
 
+> **Security and credential warning:** OAuth credentials are stored locally as owner-readable files with restrictive permissions, but they are **not encrypted at rest**. Protect the host, backups, snapshots, home directory, and any custom `--root` directory. This project is not a password manager or a defense against malware, root access, or a compromised backup. See [SECURITY.md](SECURITY.md) before using real accounts.
+>
+> Commands such as `refresh-usage`, `refresh-due`, `whoami --probe-usage`, and model/identity probes may make authenticated requests or run `agy` with a copied credential profile. Use them only when that network or process activity is intended.
+
 It keeps saved account credentials in an owner-private store and supports two ways to run `agy`:
 
 - `switch <name>` changes only the live OAuth credential and account-bound project ID, like Windows `agy-profile`.
@@ -44,6 +48,7 @@ Upstream project links (reference only; do not replace this build with its relea
 
 ## Requirements
 
+- Linux
 - Python 3.10+
 - a working `agy` binary available in `PATH`, or passed explicitly with `--agy-binary`
 - a terminal if you want to use `login` or the full-screen dashboard
@@ -258,6 +263,18 @@ agy-profile-linux update-meta account1 --short-usage-status known --short-usage-
 
 - a directory that is already a `.gemini` profile root
 - or a parent directory containing `.gemini/`
+
+## Development checks
+
+From a fresh checkout, run the test suite with the source directory on `PYTHONPATH`:
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_manager_hardening.py' -v
+python -m py_compile src/agy_profile_linux/*.py tests/test_manager_hardening.py
+python -m pip wheel --no-deps . --wheel-dir dist
+```
+
+The GitHub Actions workflow runs these checks on Python 3.10, 3.11, and 3.12.
 
 ## JSON/API-oriented usage
 

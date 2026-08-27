@@ -6,3 +6,12 @@ build/
 *.egg-info/
 .DS_Store
 AGENTS.md
+
+# Local manager state and credential-bearing profiles
+.agy-profile-linux/
+.gemini/
+*.env
+*.env.*
+*.pem
+*.key
+*.token

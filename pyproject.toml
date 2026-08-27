@@ -11,7 +11,26 @@ readme = "README.md"
 authors = [
   { name = "agy-profile-linux contributors" }
 ]
+license = { file = "LICENSE" }
 dependencies = []
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Systems Administration",
+]
+
+[project.urls]
+Homepage = "https://googol55middle-alt.github.io/agy-profile-linux/"
+Repository = "https://github.com/googol55middle-alt/agy-profile-linux"
+Issues = "https://github.com/googol55middle-alt/agy-profile-linux/issues"
 
 [project.scripts]
 agy-profile-linux = "agy_profile_linux.cli:main"

@@ -25,7 +25,7 @@
     "url": "https://googol55middle-alt.github.io/agy-profile-linux/",
     "description": "An Antigravity CLI multi-account auth manager for account login storage, active-standby failover, quota-aware switching, coordinated runtime account rotation, and automation via CLI or Python API.",
     "programmingLanguage": "Python",
-    "runtimePlatform": "Linux, macOS, Terminal",
+    "runtimePlatform": "Linux, Terminal",
     "license": "https://github.com/googol55middle-alt/agy-profile-linux/blob/main/LICENSE",
     "keywords": [
       "Antigravity CLI account manager",
@@ -186,7 +186,7 @@
         </p>
         <div class="actions">
           <a class="button primary" href="https://github.com/googol55middle-alt/agy-profile-linux">View on GitHub</a>
-          <a class="button" href="https://github.com/googol55middle-alt/agy-profile-linux/releases">Download Release</a>
+          <a class="button" href="#install">Source Install</a>
         </div>
       </div>
       <aside class="card">
@@ -204,9 +204,18 @@
 
     <section class="section">
       <h2>Install</h2>
-      <pre><code>python3 -m venv .venv
+      <pre><code>git clone https://github.com/googol55middle-alt/agy-profile-linux.git
+cd agy-profile-linux
+python3 -m venv .venv
 . .venv/bin/activate
-pip install https://github.com/googol55middle-alt/agy-profile-linux/releases/download/v0.1.0/agy_profile_linux-0.1.0-py3-none-any.whl</code></pre>
+python -m pip install .</code></pre>
+    </section>
+
+    <section class="section">
+      <h2>Security</h2>
+      <p class="muted">
+        OAuth credentials are stored as owner-readable local files, not encrypted secrets. Protect the host, backups, snapshots, and any custom manager root. Review <a href="https://github.com/googol55middle-alt/agy-profile-linux/blob/main/SECURITY.md">SECURITY.md</a> before using real accounts.
+      </p>
     </section>
 
     <section class="section">
@@ -258,7 +267,7 @@ update_switch_policy(
     <section class="section">
       <h2>Use Cases</h2>
       <p class="muted">
-        `agy-profile-linux` is useful for Telegram bots, automation workers, cron or systemd timers,
+        `agy-profile-linux` is useful on Linux for Telegram bots, automation workers, cron or systemd timers,
         multi-account Antigravity CLI auth setups, runtime account rotation, account login storage,
         and failover-aware local tooling.
       </p>

@@ -6,6 +6,7 @@ This is an independent Linux fork based on upstream `agy-cli-manager` 0.2.1. It 
 
 - Account labels are validated and cannot escape the account store.
 - Manager-controlled directories use `0700`; state, token, and project-cache files use `0600`.
+- OAuth credentials are ordinary owner-readable files, not encrypted secrets; protect the host, backups, snapshots, and custom manager root.
 - State and copied credential files are replaced atomically.
 - Manager paths, account directories, managed cache directories, state, and lock files reject symlinks.
 - The account-bound `default_project_id.txt` moves with its OAuth profile.
