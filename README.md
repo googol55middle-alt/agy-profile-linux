@@ -67,12 +67,13 @@ python3 -m venv .venv
 python -m pip install --upgrade .
 ```
 
-After that:
+After installation, verify the command is available:
 
 ```bash
 agy-profile-linux --help
-agy-profile-linux run -- --help
 ```
+
+`run` requires an initialized manager with an active saved account; follow the Quick Start steps below before using it.
 
 ## Quick Start
 
