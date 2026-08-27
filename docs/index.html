@@ -195,6 +195,33 @@ python -m pip install .</code></pre>
     </section>
 
     <section class="section">
+      <h2>Before you start</h2>
+      <p class="muted">
+        This is not the Antigravity CLI itself. It manages account files for an existing
+        <code>agy</code> installation on Linux. It does not install <code>agy</code>, create a Google
+        account, or replace the normal login process.
+      </p>
+      <p class="muted">
+        You need Linux, Python 3.10 or newer, a working <code>agy</code> command, and at least one
+        account that has already completed login in <code>agy</code>.
+      </p>
+    </section>
+
+    <section class="section">
+      <h2>First run</h2>
+      <ol class="muted">
+        <li>Initialize the manager: <code>agy-profile-linux init</code></li>
+        <li>Save the account currently logged in to <code>agy</code>: <code>agy-profile-linux save personal</code></li>
+        <li>Create another saved account with <code>agy-profile-linux login work</code>, complete the normal login in <code>agy</code>, then exit it.</li>
+        <li>Switch the live account with <code>agy-profile-linux switch work</code>, then run <code>agy</code> normally.</li>
+      </ol>
+      <p class="muted">
+        The manager stores a named copy of the authentication files it needs. It does not copy
+        your shared settings, conversations, knowledge, skills, or MCP configuration.
+      </p>
+    </section>
+
+    <section class="section">
       <h2>Security</h2>
       <p class="muted">
         OAuth credentials are stored as owner-readable local files, not encrypted secrets. Protect the host, backups, snapshots, and any custom manager root. Review <a href="https://github.com/googol55middle-alt/agy-profile-linux/blob/main/SECURITY.md">SECURITY.md</a> before using real accounts.

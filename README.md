@@ -28,10 +28,24 @@ It is application-agnostic. A Telegram bot can call it, but the manager itself i
 
 ![Sanitized dashboard example](docs/dashboard-screenshot.svg)
 
-Upstream project links (reference only; do not replace this build with its release wheel):
+## Before you start
 
-- Repo: `https://github.com/zcop/agy-cli-manager`
-- GitHub Pages site: `https://zcop.github.io/agy-cli-manager/`
+This project is not the Antigravity CLI itself. It manages account files for an existing `agy` installation on Linux. It does not install `agy`, create a Google account, or perform login for you unless you use its isolated `login` command.
+
+You need:
+
+- a Linux system;
+- Python 3.10 or newer;
+- a working `agy` command that you can run and log in to; and
+- at least one account that has completed login in `agy`.
+
+In this README, an **account profile** means a named saved copy of the authentication files that the manager needs to switch accounts. The manager keeps that copy separate from your normal shared `.gemini` settings.
+
+Related project:
+
+- [upstream `agy-cli-manager`](https://github.com/zcop/agy-cli-manager) 0.2.1
+
+This fork is independent and includes Linux-specific changes. Do not assume that an upstream release wheel contains the changes described here.
 
 ## What it does
 
@@ -85,6 +99,8 @@ agy-profile-linux --help
 `run` requires an initialized manager with an active saved account; follow the Quick Start steps below before using it.
 
 ## Quick Start
+
+The shortest first-run path is: install this manager, initialize it, save the account you are already using, then create additional profiles with the isolated login flow.
 
 ### 1. Initialize the manager state
 
