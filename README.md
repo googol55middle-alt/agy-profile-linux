@@ -1,5 +1,9 @@
 # agy-profile-linux
 
+[![test](https://github.com/googol55middle-alt/agy-profile-linux/actions/workflows/test.yml/badge.svg)](https://github.com/googol55middle-alt/agy-profile-linux/actions/workflows/test.yml)
+
+[Project website](https://googol55middle-alt.github.io/agy-profile-linux/) · [Security policy](SECURITY.md)
+
 `agy-profile-linux` is an independent Linux fork based on upstream 0.2.1. It is not affiliated with the upstream maintainers, Google, or Antigravity.
 
 > **Security and credential warning:** OAuth credentials are stored locally as owner-readable files with restrictive permissions, but they are **not encrypted at rest**. Protect the host, backups, snapshots, home directory, and any custom `--root` directory. This project is not a password manager or a defense against malware, root access, or a compromised backup. See [SECURITY.md](SECURITY.md) before using real accounts.
@@ -11,10 +15,7 @@ It keeps saved account credentials in an owner-private store and supports two wa
 - `switch <name>` changes only the live OAuth credential and account-bound project ID, like Windows `agy-profile`.
 - `run -- <agy arguments>` uses a disposable isolated runtime when you do not want to touch the live home.
 - shared `.gemini` settings, conversations, knowledge, skills, and MCP configuration stay in place during a live switch.
-- switching is manual and refuses to proceed while `agy` is running.
-
-Keywords:
-Antigravity CLI account manager, Antigravity CLI multi account manager, Antigravity multi account auth, Antigravity login manager, Antigravity auth manager, Antigravity account switcher, agy multi account manager, agy multi account auth, agy login manager, agy auth manager, agy failover, agy quota switching, Gemini CLI multi account auth, Gemini CLI account rotation.
+- a live switch refuses to proceed while `agy` is running unless you explicitly ask the manager to close it gracefully.
 
 It is designed for one active account at a time:
 
@@ -34,7 +35,7 @@ Upstream project links (reference only; do not replace this build with its relea
 
 ## What it does
 
-- stores multiple account profiles safely
+- stores account profiles with restrictive permissions and atomic updates
 - keeps one account active while others stay standby/cooldown/disabled
 - supports isolated interactive `agy` login
 - can import an existing `.gemini` profile from an explicit source path
@@ -45,6 +46,14 @@ Upstream project links (reference only; do not replace this build with its relea
 - tracks live switch coordinator state for callers that need to wait on failover
 - exposes CLI commands and JSON output for automation
 - supports account failover with cooldowns and lock-protected state changes
+
+## Limits
+
+- Linux is the only supported platform. The implementation relies on Linux process and filesystem behavior.
+- Credentials are protected by local file permissions, not encryption.
+- Quota and health metadata can become stale. A real request result remains the final authority.
+- Automatic switching is optional and requires `auto` mode plus an eligible standby account.
+- The manager coordinates account changes; the calling application decides whether and when to retry failed work.
 
 ## Requirements
 
@@ -99,7 +108,7 @@ This matches Windows `agy-profile save personal`:
 agy-profile-linux save personal
 ```
 
-The manager stores only the OAuth credential and account-bound project ID. It does not copy your shared `.gemini` settings, conversations, knowledge, skills, or MCP configuration.
+Each saved account profile copies only the OAuth credential and account-bound project ID. Separate manager state records non-credential data such as identity, health, usage, cooldowns, and switch history. It does not copy your shared `.gemini` settings, conversations, knowledge, skills, or MCP configuration.
 
 To create another saved account, use the isolated interactive login flow:
 
@@ -136,7 +145,7 @@ agy-profile-linux
 
 With no subcommand, the full-screen dashboard opens by default.
 
-## First Useful Commands
+## First useful commands
 
 ```bash
 agy-profile-linux status --json

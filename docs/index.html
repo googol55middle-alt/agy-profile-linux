@@ -3,19 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>agy-profile-linux | Antigravity CLI Account Manager</title>
-  <meta name="description" content="agy-profile-linux is an Antigravity CLI multi-account auth manager for account login storage, quota-aware failover, runtime account rotation, and automation via CLI or Python API.">
-  <meta name="keywords" content="Antigravity CLI account manager, Antigravity CLI multi account manager, Antigravity multi account auth, Antigravity login manager, Antigravity auth manager, Antigravity account switcher, Antigravity CLI failover, Antigravity CLI quota switching, agy account manager, agy multi account manager, agy multi account auth, agy account switcher, agy login manager, agy auth manager, agy failover, agy quota switching, Gemini CLI multi account auth, Gemini CLI account rotation, Gemini auth manager, CLI account rotation manager, Antigravity automation API, agy automation API, agy dashboard">
+  <title>agy-profile-linux | Independent Linux account manager for agy</title>
+  <meta name="description" content="An independent Linux tool for saving, switching, and running Antigravity CLI account profiles.">
   <meta name="robots" content="index,follow">
   <link rel="canonical" href="https://googol55middle-alt.github.io/agy-profile-linux/">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="agy-profile-linux | Antigravity CLI Account Manager">
-  <meta property="og:description" content="Manage multiple Antigravity CLI accounts with multi-account auth storage, active-standby failover, quota-aware switching, coordinated runtime failover, and automation APIs.">
+  <meta property="og:title" content="agy-profile-linux | Independent Linux account manager for agy">
+  <meta property="og:description" content="Save and switch Antigravity CLI account profiles on Linux, with optional failover controls for external callers.">
   <meta property="og:url" content="https://googol55middle-alt.github.io/agy-profile-linux/">
   <meta property="og:image" content="https://googol55middle-alt.github.io/agy-profile-linux/dashboard-screenshot.svg">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="agy-profile-linux | Antigravity CLI Account Manager">
-  <meta name="twitter:description" content="Multi-account auth, failover, quota-aware switching, and automation for Antigravity CLI.">
+  <meta name="twitter:title" content="agy-profile-linux | Independent Linux account manager for agy">
+  <meta name="twitter:description" content="Save and switch Antigravity CLI account profiles on Linux.">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -23,26 +22,10 @@
     "name": "agy-profile-linux",
     "codeRepository": "https://github.com/googol55middle-alt/agy-profile-linux",
     "url": "https://googol55middle-alt.github.io/agy-profile-linux/",
-    "description": "An Antigravity CLI multi-account auth manager for account login storage, active-standby failover, quota-aware switching, coordinated runtime account rotation, and automation via CLI or Python API.",
+    "description": "An independent Linux tool for saving, switching, and running Antigravity CLI account profiles.",
     "programmingLanguage": "Python",
-    "runtimePlatform": "Linux, Terminal",
-    "license": "https://github.com/googol55middle-alt/agy-profile-linux/blob/main/LICENSE",
-    "keywords": [
-      "Antigravity CLI account manager",
-      "Antigravity CLI multi account manager",
-      "Antigravity multi account auth",
-      "Antigravity login manager",
-      "Antigravity auth manager",
-      "agy multi account manager",
-      "agy multi account auth",
-      "agy auth manager",
-      "agy login manager",
-      "agy failover",
-      "agy quota switching",
-      "CLI account rotation manager",
-      "Gemini CLI multi account auth",
-      "Gemini CLI account rotation"
-    ]
+    "runtimePlatform": "Linux",
+    "license": "https://github.com/googol55middle-alt/agy-profile-linux/blob/main/LICENSE"
   }
   </script>
   <style>
@@ -154,10 +137,7 @@
     .muted {
       color: var(--muted);
     }
-    .keywords {
-      font-size: 0.95rem;
-      color: var(--muted);
-    }
+
     footer {
       margin-top: 48px;
       color: var(--muted);
@@ -177,12 +157,15 @@
   <main class="wrap">
     <section class="hero">
       <div>
-        <p class="eyebrow">Antigravity CLI Tooling</p>
+        <p class="eyebrow">Independent Linux project</p>
         <h1>agy-profile-linux</h1>
         <p class="lede">
-          A multi-account auth and account-switching manager for Antigravity CLI (`agy`)
-          with active-standby failover, quota-aware account switching, coordinated runtime
-          failover, Python API control, and terminal dashboard workflows.
+          Save multiple Antigravity CLI (<code>agy</code>) account profiles, switch the live account,
+          or run a profile in an isolated home. Optional policies help external tools coordinate
+          account changes after quota or authentication failures.
+        </p>
+        <p class="muted">
+          This project is not affiliated with Google, Antigravity, or the upstream maintainers.
         </p>
         <div class="actions">
           <a class="button primary" href="https://github.com/googol55middle-alt/agy-profile-linux">View on GitHub</a>
@@ -190,11 +173,11 @@
         </div>
       </div>
       <aside class="card">
-        <h2>What It Solves</h2>
+        <h2>What it does</h2>
         <ul>
-          <li>Manage multiple `agy` accounts from one runtime.</li>
-          <li>Store and restore multiple AGY login/auth profiles safely.</li>
-          <li>Switch off low-quota or failed accounts automatically.</li>
+          <li>Manage multiple <code>agy</code> accounts from one runtime.</li>
+          <li>Store account profiles with restrictive permissions and atomic updates.</li>
+          <li>Optionally switch away from a low-quota or failed account in automatic mode.</li>
           <li>Coordinate runtime failover to avoid double account switching.</li>
           <li>Expose machine-readable APIs for bots and schedulers.</li>
           <li>Support manual and automatic switching policies.</li>
@@ -219,37 +202,37 @@ python -m pip install .</code></pre>
     </section>
 
     <section class="section">
-      <h2>Core Features</h2>
+      <h2>Core features</h2>
       <div class="grid">
         <div class="card">
-          <h3>Quota-Aware Switching</h3>
-          <p>Use short-window usage thresholds and refresh-failure counters to move off unhealthy accounts before requests break.</p>
+          <h3>Quota-aware switching</h3>
+          <p>In automatic mode, use cached short-window thresholds and refresh-failure counters to choose when to leave an account. Cached values are advisory.</p>
         </div>
         <div class="card">
-          <h3>Ranked Account Pool</h3>
-          <p>Choose fuller and healthier standby accounts instead of blindly rotating in name order.</p>
+          <h3>Ranked account pool</h3>
+          <p>Rank eligible standby accounts using saved health and short-window quota metadata instead of rotating by name.</p>
         </div>
         <div class="card">
           <h3>Automation API</h3>
           <p>Control switch mode, switch policy, usage refresh, and failover through CLI commands or a Python API.</p>
         </div>
         <div class="card">
-          <h3>Runtime Failover Control</h3>
-          <p>Coordinate account switching for callers like bots so one failure event leads to one managed switch and one retry.</p>
+          <h3>Runtime failover control</h3>
+          <p>Coordinate one account change after a failure so an external caller can decide whether to retry.</p>
         </div>
         <div class="card">
-          <h3>Terminal Dashboard</h3>
+          <h3>Terminal dashboard</h3>
           <p>Inspect active, standby, cooldown, usage, and switch runtime state from a focused TUI built for operator workflows.</p>
         </div>
         <div class="card">
-          <h3>Bot Integration</h3>
-          <p>Use the manager as a switch authority for Telegram bots, automation workers, or any app that needs controlled AGY failover.</p>
+          <h3>External integrations</h3>
+          <p>Call the CLI or Python API from bots, schedulers, or other local automation that needs coordinated account switching.</p>
         </div>
       </div>
     </section>
 
     <section class="section">
-      <h2>Python API Example</h2>
+      <h2>Python API example</h2>
       <pre><code>from pathlib import Path
 from agy_profile_linux import build_paths, get_switch_policy, update_switch_policy
 
@@ -265,30 +248,22 @@ update_switch_policy(
     </section>
 
     <section class="section">
-      <h2>Use Cases</h2>
+      <h2>Use cases</h2>
       <p class="muted">
-        `agy-profile-linux` is useful on Linux for Telegram bots, automation workers, cron or systemd timers,
+        <code>agy-profile-linux</code> is useful on Linux for Telegram bots, automation workers, cron or systemd timers,
         multi-account Antigravity CLI auth setups, runtime account rotation, account login storage,
         and failover-aware local tooling.
       </p>
-      <p class="keywords">
-        Keywords: Antigravity CLI account manager, agy multi account manager, agy multi account auth,
-        agy login manager, agy auth manager, agy account switcher, agy failover,
-        agy quota switching, Antigravity CLI multi account manager, Antigravity multi account auth,
-        Antigravity login manager, Antigravity auth manager, Antigravity account switcher,
-        Gemini CLI multi account auth, Gemini CLI account rotation, active-standby CLI manager,
-        agy automation API, Antigravity automation API, Antigravity CLI failover,
-        runtime account rotation manager.
-      </p>
+
     </section>
 
     <footer>
       <p>
-        agy-profile-linux is an open source Antigravity CLI account manager focused on
-        multi-account auth storage, quota-aware AGY switching, coordinated runtime retry flows,
-        login profile management, and automation-friendly CLI and Python APIs.
+        agy-profile-linux is an independent, open-source Linux project based on
+        <a href="https://github.com/zcop/agy-cli-manager">agy-cli-manager</a> 0.2.1.
+        It is not affiliated with Google, Antigravity, or the upstream maintainers.
       </p>
-      <p>Source code, releases, and documentation live on GitHub.</p>
+      <p>Source code and documentation live on GitHub.</p>
     </footer>
   </main>
 </body>
