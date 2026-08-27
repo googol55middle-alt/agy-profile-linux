@@ -179,7 +179,7 @@
           <li>Store account profiles with restrictive permissions and atomic updates.</li>
           <li>Optionally switch away from a low-quota or failed account in automatic mode.</li>
           <li>Coordinate runtime failover to avoid double account switching.</li>
-          <li>Expose machine-readable APIs for bots and schedulers.</li>
+          <li>Expose machine-readable APIs for automation tools and schedulers.</li>
           <li>Support manual and automatic switching policies.</li>
         </ul>
       </aside>
@@ -254,7 +254,7 @@ python -m pip install .</code></pre>
         </div>
         <div class="card">
           <h3>External integrations</h3>
-          <p>Call the CLI or Python API from bots, schedulers, or other local automation that needs coordinated account switching.</p>
+          <p>Call the CLI or Python API from schedulers or other local automation that needs coordinated account switching.</p>
         </div>
       </div>
     </section>
@@ -278,7 +278,7 @@ update_switch_policy(
     <section class="section">
       <h2>Use cases</h2>
       <p class="muted">
-        <code>agy-profile-linux</code> is useful on Linux for Telegram bots, automation workers, cron or systemd timers,
+        <code>agy-profile-linux</code> is useful on Linux for automation workers, cron or systemd timers,
         multi-account Antigravity CLI auth setups, runtime account rotation, account login storage,
         and failover-aware local tooling.
       </p>

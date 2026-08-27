@@ -12,7 +12,7 @@
 
 It keeps saved account credentials in an owner-private store and supports two ways to run `agy`:
 
-- `switch <name>` changes only the live OAuth credential and account-bound project ID, like Windows `agy-profile`.
+- `switch <name>` changes only the live OAuth credential and account-bound project ID in the normal `agy` home.
 - `run -- <agy arguments>` uses a disposable isolated runtime when you do not want to touch the live home.
 - shared `.gemini` settings, conversations, knowledge, skills, and MCP configuration stay in place during a live switch.
 - a live switch refuses to proceed while `agy` is running unless you explicitly ask the manager to close it gracefully.
@@ -24,7 +24,7 @@ It is designed for one active account at a time:
 - expose machine-readable state for external callers
 - stay usable as a CLI app, TUI dashboard, or Python library
 
-It is application-agnostic. A Telegram bot can call it, but the manager itself is not Telegram-specific.
+It is application-agnostic. External programs can call its CLI or Python API; this project does not include app-specific integrations.
 
 ![Sanitized dashboard example](docs/dashboard-screenshot.svg)
 
@@ -122,7 +122,7 @@ You can override that with `--root /path/to/root`.
 
 ### 2. Save the account you are currently using
 
-This matches Windows `agy-profile save personal`:
+This saves the account currently logged in to the normal `agy` home:
 
 ```bash
 agy-profile-linux save personal
@@ -202,7 +202,7 @@ Directory layout:
 
 ## Live switching and isolated runtime
 
-The normal `switch <name>` command follows the Windows `agy-profile` model. It updates only these account-bound files in your normal `~/.gemini` home:
+The normal `switch <name>` command updates only these account-bound files in your normal `~/.gemini` home:
 
 ```text
 antigravity-cli/antigravity-oauth-token
@@ -344,11 +344,11 @@ Notes:
 - `agy-profile-linux login` prompts for the account name if you do not pass one
 - `switch-next` skips accounts in cooldown.
 - `mark-bad` clears the active pointer if that account was active.
-- `ensure-active` evaluates the current policy and can automatically recover from no active account, known low 5-hour quota, auth missing, or repeated refresh failures.
+- in `auto` mode, `ensure-active` evaluates the current policy and can recover from no active account, known low 5-hour quota, auth missing, or repeated refresh failures.
 - `ensure-active` returns JSON with `switch_runtime`, so callers can see whether the manager is idle, switching, ready, or has no standby account available.
 - `switch-mode` controls whether `rotate-after-failure` automatically moves to the next eligible standby account or stops after marking the active account bad.
 - `switch-policy` controls the proactive short-window threshold, refresh-failure threshold, and standby candidate ranking strategy.
-- state and switching are protected by a single lock file so a caller can safely trigger failover from another process.
+- state and switching are protected by a single lock file so another process can coordinate failover without racing a concurrent switch.
 - `run` holds that lock while it runs `agy` with `HOME` set to the private runtime.
 - `set-live-dir` clears only a legacy setting; assigning a real CLI home is disabled in this fork.
 - the manager currently copies the managed profile under `.gemini/`, centered on the Antigravity auth/token artifacts it needs for switching.
@@ -360,7 +360,7 @@ Notes:
 - `models` runs `agy models` for the active account or a named saved profile and can return structured JSON for external callers.
 - the manager intentionally does not use scripted PTY startup probing for `agy`; profile switching is filesystem-based and runtime health should come from real request success/failure in the caller.
 - in `auto` mode, `ensure-active` and `refresh-usage`/`refresh-due` can proactively switch away from an active account when the cached 5-hour window falls to the configured `short_usage_threshold_percent`, auth is missing, or refresh failures reach the configured threshold.
-- cached quota is advisory; real runtime failure is still the final authority for callers such as bots.
+- cached quota is advisory; real runtime failure is still the final authority for the external program handling the request.
 - when auto-switching, the manager ranks the standby pool and prefers accounts with better health and more remaining short-window quota instead of simply taking the first account by name.
 - the default switch policy is `short_usage_threshold_percent=10`, `refresh_failure_threshold=2`, `candidate_strategy=balanced`.
 - `rotate-after-failure` is the public failover operation for external apps: mark the current active account bad, optionally put it in cooldown, then switch to the next eligible standby account.
