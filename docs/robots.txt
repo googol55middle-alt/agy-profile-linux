@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://zcop.github.io/agy-cli-manager/sitemap.xml
+Sitemap: https://googol55middle-alt.github.io/agy-profile-linux/sitemap.xml

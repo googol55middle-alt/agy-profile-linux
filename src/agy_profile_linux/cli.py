@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import curses
 import json
+import re
 import textwrap
 import sys
 import threading
@@ -11,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from queue import Empty, SimpleQueue
 
-from agy_cli_manager.manager import (
+from agy_profile_linux.manager import (
     add_account,
     apply_active,
     build_paths,
@@ -22,7 +23,6 @@ from agy_cli_manager.manager import (
     format_status,
     get_account_identity,
     get_account_proxy,
-    get_live_dir,
     pick_due_refresh_account,
     get_status_snapshot,
     import_current,
@@ -36,12 +36,15 @@ from agy_cli_manager.manager import (
     refresh_due_account,
     refresh_account_identity,
     rotate_after_failure,
+    run_active,
+    save_current_account,
     clear_account_proxy,
     set_live_dir,
     set_account_proxy,
     set_enabled,
     set_switch_mode,
     switch_account,
+    switch_live_account,
     switch_next,
     update_switch_policy,
     update_account_runtime_metadata,
@@ -49,7 +52,7 @@ from agy_cli_manager.manager import (
 )
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agy-cli-manager")
+    parser = argparse.ArgumentParser(prog="agy-profile-linux")
     parser.add_argument("--root", type=Path, default=default_root(), help="Manager root directory")
 
     sub = parser.add_subparsers(dest="command")
@@ -85,7 +88,10 @@ def build_parser() -> argparse.ArgumentParser:
     proxy_clear = sub.add_parser("proxy-clear", help="Clear proxy metadata for an account")
     proxy_clear.add_argument("name")
     proxy_clear.add_argument("--json", action="store_true", help="Print machine-readable JSON")
-    sub.add_parser("apply-active", help="Re-apply the current active account to runtime and live_dir")
+    sub.add_parser("apply-active", help="Re-apply the current active account to the isolated runtime")
+    run = sub.add_parser("run", help="Run agy with the active account in an isolated locked runtime")
+    run.add_argument("--agy-binary")
+    run.add_argument("agy_args", nargs=argparse.REMAINDER, help="Arguments forwarded to agy")
     ensure_cmd = sub.add_parser("ensure-active", help="Evaluate switch policy and ensure there is a usable active account")
     ensure_cmd.add_argument("--force", action="store_true", help="Apply the policy even when switch mode is manual")
     ensure_cmd.add_argument("--json", action="store_true", help="Print machine-readable JSON")
@@ -122,19 +128,28 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("name")
     add.add_argument("source_dir", type=Path)
 
-    import_cmd = sub.add_parser("import-current", help="Import the current live_dir or a provided source dir as an account")
+    import_cmd = sub.add_parser("import-current", help="Import an explicit source directory as an account")
     import_cmd.add_argument("name")
-    import_cmd.add_argument("source_dir", type=Path, nargs="?")
+    import_cmd.add_argument("source_dir", type=Path)
+
+    save = sub.add_parser("save", help="Save the account currently logged in to the normal agy home")
+    save.add_argument("name")
+    save.add_argument("--force", action="store_true", help="Overwrite an existing saved account")
 
     login = sub.add_parser("login", help="Run isolated agy login and save the resulting profile")
     login.add_argument("name", nargs="?")
     login.add_argument("--agy-binary")
     login.add_argument("--timeout-seconds", type=int, default=600)
 
-    switch = sub.add_parser("switch", help="Switch to a named account")
+    switch = sub.add_parser("switch", help="Switch the live agy account without changing shared .gemini data")
     switch.add_argument("name")
+    switch.add_argument("--isolated", action="store_true", help="Switch only the manager's isolated runtime")
+    switch.add_argument("--close", action="store_true", help="Gracefully close matching live-home agy processes before switching")
+    switch.add_argument("--close-timeout-seconds", type=float, default=10.0, help="Maximum graceful-close wait (1-60 seconds)")
     activate = sub.add_parser("activate", help="Alias for switch")
     activate.add_argument("name")
+    activate.add_argument("--close", action="store_true", help="Gracefully close matching live-home agy processes before switching")
+    activate.add_argument("--close-timeout-seconds", type=float, default=10.0, help="Maximum graceful-close wait (1-60 seconds)")
 
     sub.add_parser("switch-next", help="Switch to the next enabled standby account")
     rotate_cmd = sub.add_parser("rotate", help="Alias for switch-next")
@@ -154,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     clear = sub.add_parser("clear-bad", help="Clear cooldown/error state for an account")
     clear.add_argument("name")
 
-    live = sub.add_parser("set-live-dir", help="Set or clear a real live CLI home directory")
+    live = sub.add_parser("set-live-dir", help="Clear a legacy live-profile setting; live synchronization is disabled")
     live.add_argument("path", nargs="?")
 
     rotate = sub.add_parser("rotate-after-failure", help="Mark the active account bad and switch to the next standby account")
@@ -162,7 +177,6 @@ def build_parser() -> argparse.ArgumentParser:
     rotate.add_argument("--trigger", default="cli")
     rotate.add_argument("--request-id")
     rotate.add_argument("--cooldown-minutes", type=int, default=60)
-    rotate.add_argument("--live-dir")
     rotate.add_argument("--force-switch", action="store_true", help="Switch even if the manager is in manual mode")
     rotate.add_argument("--json", action="store_true", help="Print machine-readable JSON")
 
@@ -228,13 +242,13 @@ def run_login_with_prompt(
 def run_menu(paths, parser: argparse.ArgumentParser) -> int:
     ensure_layout(paths)
     while True:
-        print("\nagy-cli-manager")
+        print("\nagy-profile-linux")
         print("1. Status")
         print("2. Login account")
-        print("3. Import current/live profile")
+        print("3. Import profile from a source directory")
         print("4. Switch account")
         print("5. Switch next")
-        print("6. Set live dir")
+        print("6. Clear legacy live-profile setting")
         print("7. Disable account")
         print("8. Enable account")
         print("9. Mark account bad")
@@ -260,19 +274,18 @@ def run_menu(paths, parser: argparse.ArgumentParser) -> int:
                 print(f"{'logged-in' if stored_name else 'cancelled'}: {stored_name or name}")
             elif choice == "3":
                 name = prompt_nonempty("Account name")
-                source_dir = prompt_optional_path("Source dir")
+                source_dir = Path(prompt_nonempty("Source dir")).expanduser()
                 import_current(paths, name, source_dir)
                 print(f"imported-current: {name}")
             elif choice == "4":
                 name = prompt_nonempty("Account name")
-                previous = switch_account(paths, name)
+                previous = switch_live_account(paths, name)
                 print(f"switched: {previous + ' -> ' if previous else ''}{name}")
             elif choice == "5":
                 print(f"switched-next: {switch_next(paths)}")
             elif choice == "6":
-                live_dir = prompt_optional_path("Live dir")
-                set_live_dir(paths, live_dir)
-                print(f"live-dir: {live_dir if live_dir else 'cleared'}")
+                set_live_dir(paths, None)
+                print("legacy-live-dir-cleared")
             elif choice == "7":
                 name = prompt_nonempty("Account name")
                 set_enabled(paths, name, False)
@@ -968,12 +981,12 @@ def _start_usage_refresh_worker(paths, name: str, result_queue: SimpleQueue) -> 
                     "weekly_usage_value": result.weekly_usage_value,
                 }
             )
-        except Exception as exc:
+        except Exception:
             result_queue.put(
                 {
                     "account": name,
                     "ok": False,
-                    "error": str(exc),
+                    "error": "Usage refresh failed.",
                 }
             )
 
@@ -1235,7 +1248,7 @@ def _run_dashboard_terminal_action(stdscr, fn):
 
 
 def _dashboard_login(paths) -> str:
-    print("\n[agy-cli-manager] Login Account\n")
+    print("\n[agy-profile-linux] Login Account\n")
     name = prompt_nonempty("Account name")
     agy_binary = input("agy binary [auto]: ").strip() or None
     timeout_raw = input("timeout seconds [600]: ").strip() or "600"
@@ -1244,7 +1257,7 @@ def _dashboard_login(paths) -> str:
 
 
 def _dashboard_import(paths) -> str:
-    print("\n[agy-cli-manager] Import Current/Live Profile\n")
+    print("\n[agy-profile-linux] Import Current/Live Profile\n")
     name = prompt_nonempty("Account name")
     source_dir = prompt_optional_path("Source dir")
     import_current(paths, name, source_dir)
@@ -1609,7 +1622,7 @@ def _dashboard(stdscr, paths) -> int:
                     refresh_inflight_name = selected_name
                     message = f"Background refreshing {selected_name}..."
             elif key in (10, 13, curses.KEY_ENTER, ord("a"), ord("A")):
-                previous = switch_account(paths, selected_name)
+                previous = switch_live_account(paths, selected_name)
                 message = f"Activated {selected_name}." if previous != selected_name else f"{selected_name} already active."
             elif key in (ord("r"), ord("R")):
                 target = switch_next(paths)
@@ -1788,6 +1801,11 @@ def print_proxy_show(paths, name: str | None, as_json: bool) -> None:
     print(f"proxy_url: {proxy.get('url') or '-'}")
 
 
+def _sanitize_cli_error(exc: ValueError) -> str:
+    message = str(exc)
+    return re.sub(r"(?<![\\w:])/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+", "[path]", message)
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -1881,23 +1899,22 @@ def main() -> int:
                     source_dir = paths.accounts_dir / args.name
                 else:
                     source_dir = paths.runtime_dir
-                live_dir = get_live_dir(load_state(paths))
                 probe = probe_profile_identity_via_usage(
                     source_dir,
                     args.agy_binary,
                     args.timeout_seconds,
-                    live_dir=live_dir,
+                    scratch_root=paths.root,
                 )
                 print(f"usage_account_name: {probe.get('account_name') or '-'}")
                 print(f"usage_source: {probe.get('source') or '-'}")
-                if probe.get("raw_hint"):
-                    print("usage_hint:")
-                    print(probe["raw_hint"])
             return 0
         if args.command == "apply-active":
             active = apply_active(paths)
             print(f"applied-active: {active}")
             return 0
+        if args.command == "run":
+            agy_args = args.agy_args[1:] if args.agy_args[:1] == ["--"] else args.agy_args
+            return run_active(paths, args.agy_binary, agy_args)
         if args.command == "ensure-active":
             result = ensure_active_account(paths, force=args.force)
             snapshot = get_status_snapshot(paths)
@@ -2055,20 +2072,38 @@ def main() -> int:
             import_current(paths, args.name, args.source_dir)
             print(f"imported-current: {args.name}")
             return 0
+        if args.command == "save":
+            save_current_account(paths, args.name, overwrite=args.force)
+            print(f"saved-current: {args.name}")
+            return 0
         if args.command == "login":
             name = args.name or prompt_nonempty("Account name")
             stored_name = run_login_with_prompt(paths, name, args.agy_binary, args.timeout_seconds)
             print(f"{'logged-in' if stored_name else 'cancelled'}: {stored_name or name}")
             return 0
         if args.command == "switch":
-            previous = switch_account(paths, args.name)
+            previous = (
+                switch_account(paths, args.name)
+                if args.isolated
+                else switch_live_account(
+                    paths,
+                    args.name,
+                    close_running=args.close,
+                    close_timeout_seconds=args.close_timeout_seconds,
+                )
+            )
             if previous:
                 print(f"switched: {previous} -> {args.name}")
             else:
                 print(f"switched: {args.name}")
             return 0
         if args.command == "activate":
-            previous = switch_account(paths, args.name)
+            previous = switch_live_account(
+                paths,
+                args.name,
+                close_running=args.close,
+                close_timeout_seconds=args.close_timeout_seconds,
+            )
             if previous:
                 print(f"activated: {previous} -> {args.name}")
             else:
@@ -2102,17 +2137,17 @@ def main() -> int:
             print(f"cleared-bad: {args.name}")
             return 0
         if args.command == "set-live-dir":
-            live_dir = Path(args.path).expanduser() if args.path else None
-            set_live_dir(paths, live_dir)
-            print(f"live-dir: {live_dir if live_dir else 'cleared'}")
+            if args.path:
+                set_live_dir(paths, Path(args.path).expanduser())
+            else:
+                set_live_dir(paths, None)
+                print("legacy-live-dir-cleared")
             return 0
         if args.command == "rotate-after-failure":
-            live_dir = Path(args.live_dir).expanduser() if args.live_dir else None
             result = rotate_after_failure(
                 paths,
                 reason=args.reason,
                 cooldown_minutes=args.cooldown_minutes,
-                live_dir=live_dir,
                 force_switch=args.force_switch,
                 trigger=args.trigger,
                 request_id=args.request_id,
@@ -2168,7 +2203,9 @@ def main() -> int:
                 print(f"updated-meta: {args.name}")
             return 0
     except ValueError as e:
-        parser.exit(2, f"error: {e}\n")
+        parser.exit(2, f"error: {_sanitize_cli_error(e)}\n")
+    except OSError:
+        parser.exit(2, "error: operation failed due to an operating-system error.\n")
     except KeyboardInterrupt:
         print("\nCancelled.")
         return 130

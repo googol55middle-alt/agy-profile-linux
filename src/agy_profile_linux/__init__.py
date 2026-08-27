@@ -1,6 +1,6 @@
-"""agy-cli-manager package."""
+"""agy-profile-linux package."""
 
-from agy_cli_manager.manager import (
+from agy_profile_linux.manager import (
     ManagerPaths,
     RotationResult,
     apply_active,
@@ -16,6 +16,9 @@ from agy_cli_manager.manager import (
     refresh_account_usage,
     refresh_due_account,
     rotate_after_failure,
+    run_active,
+    save_current_account,
+    switch_live_account,
     get_account_proxy,
     set_live_dir,
     set_account_proxy,
@@ -26,6 +29,7 @@ from agy_cli_manager.manager import (
     update_switch_policy,
     update_account_runtime_metadata,
     clear_account_proxy,
+    close_live_agy,
 )
 
 __all__ = [
@@ -44,6 +48,9 @@ __all__ = [
     "refresh_account_usage",
     "refresh_due_account",
     "rotate_after_failure",
+    "run_active",
+    "save_current_account",
+    "switch_live_account",
     "get_account_proxy",
     "set_live_dir",
     "set_account_proxy",
@@ -54,4 +61,5 @@ __all__ = [
     "update_switch_policy",
     "update_account_runtime_metadata",
     "clear_account_proxy",
+    "close_live_agy",
 ]

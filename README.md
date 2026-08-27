@@ -1,13 +1,13 @@
-# agy-cli-manager
+# agy-profile-linux
 
-`agy-cli-manager` is a Python account manager for Antigravity CLI (`agy`) with active-standby failover, quota-aware switching, and machine-readable automation APIs.
+`agy-profile-linux` is an independent Linux fork based on upstream 0.2.1. It is not affiliated with the upstream maintainers, Google, or Antigravity.
 
-It helps you run multiple Antigravity CLI accounts more safely by:
+It keeps saved account credentials in an owner-private store and supports two ways to run `agy`:
 
-- switching away from low-quota or failed accounts
-- keeping a managed runtime profile in sync with the active account
-- exposing CLI and Python APIs for bots, schedulers, and external apps
-- supporting manual or automatic account rotation policies
+- `switch <name>` changes only the live OAuth credential and account-bound project ID, like Windows `agy-profile`.
+- `run -- <agy arguments>` uses a disposable isolated runtime when you do not want to touch the live home.
+- shared `.gemini` settings, conversations, knowledge, skills, and MCP configuration stay in place during a live switch.
+- switching is manual and refuses to proceed while `agy` is running.
 
 Keywords:
 Antigravity CLI account manager, Antigravity CLI multi account manager, Antigravity multi account auth, Antigravity login manager, Antigravity auth manager, Antigravity account switcher, agy multi account manager, agy multi account auth, agy login manager, agy auth manager, agy failover, agy quota switching, Gemini CLI multi account auth, Gemini CLI account rotation.
@@ -23,10 +23,9 @@ It is application-agnostic. A Telegram bot can call it, but the manager itself i
 
 ![Sanitized dashboard example](docs/dashboard-screenshot.svg)
 
-Project links:
+Upstream project links (reference only; do not replace this build with its release wheel):
 
 - Repo: `https://github.com/zcop/agy-cli-manager`
-- Release wheel: `https://github.com/zcop/agy-cli-manager/releases`
 - GitHub Pages site: `https://zcop.github.io/agy-cli-manager/`
 
 ## What it does
@@ -34,8 +33,9 @@ Project links:
 - stores multiple account profiles safely
 - keeps one account active while others stay standby/cooldown/disabled
 - supports isolated interactive `agy` login
-- can import an existing `~/.gemini` or similar live home
-- supports both manual-only and automatic failover switching modes
+- can import an existing `.gemini` profile from an explicit source path
+- uses a private manager runtime for `run`, while normal `switch` updates only the live account files
+- supports manual switching and optional failover policies
 - prefers fuller, healthier standby accounts when auto-switching
 - tracks cached identity, health, and usage metadata
 - tracks live switch coordinator state for callers that need to wait on failover
@@ -50,39 +50,23 @@ Project links:
 
 ## Install
 
-From a GitHub release wheel:
+Read [LOCAL_HARDENING.md](LOCAL_HARDENING.md) before importing an account or running `agy` through this fork.
+
+Do **not** replace this build with an upstream release wheel: the upstream release does not contain these local security changes.
+
+From this checkout:
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-pip install https://github.com/zcop/agy-cli-manager/releases/download/v0.2.1/agy_cli_manager-0.2.1-py3-none-any.whl
+python -m pip install --upgrade .
 ```
 
-To move to a newer release later, replace `v0.2.1` and the wheel filename with the newer version:
+After that:
 
 ```bash
-pip install --upgrade https://github.com/zcop/agy-cli-manager/releases/download/v0.2.1/agy_cli_manager-0.2.1-py3-none-any.whl
-```
-
-From this repo:
-
-```bash
-cd agy-cli-manager
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -e .
-```
-
-After that, you can use either:
-
-```bash
-agy-cli-manager --help
-```
-
-or:
-
-```bash
-PYTHONPATH=src python3 -m agy_cli_manager.cli --help
+agy-profile-linux --help
+agy-profile-linux run -- --help
 ```
 
 ## Quick Start
@@ -90,45 +74,58 @@ PYTHONPATH=src python3 -m agy_cli_manager.cli --help
 ### 1. Initialize the manager state
 
 ```bash
-agy-cli-manager init
+agy-profile-linux init
 ```
 
 By default, state lives under:
 
 ```text
-~/.agy-cli-manager
+~/.agy-profile-linux
 ```
 
 You can override that with `--root /path/to/root`.
 
-### 2. Add your first account
+### 2. Save the account you are currently using
 
-If you already have a live Antigravity home:
+This matches Windows `agy-profile save personal`:
 
 ```bash
-agy-cli-manager import-current my-account ~/.gemini
+agy-profile-linux save personal
 ```
 
-If you want the manager to drive a fresh interactive login itself:
+The manager stores only the OAuth credential and account-bound project ID. It does not copy your shared `.gemini` settings, conversations, knowledge, skills, or MCP configuration.
+
+To create another saved account, use the isolated interactive login flow:
 
 ```bash
-agy-cli-manager login my-account --agy-binary /path/to/agy
+agy-profile-linux login work
 ```
 
-`login` will hand your terminal to a real `agy` session. Complete the normal Antigravity onboarding/login there, then exit `agy`. The manager will save the resulting profile snapshot.
+Complete the normal Google login in `agy`, then exit it. The manager saves that account without changing the live account.
 
-### 3. Check what is active
+### 3. Switch accounts quickly
+
+Stop `agy` first, then switch the live account:
 
 ```bash
-agy-cli-manager status
-agy-cli-manager current
-agy-cli-manager list
+agy-profile-linux switch work
+agy
 ```
 
-### 4. Open the dashboard
+Switching replaces only the live OAuth credential and account-bound project ID. The next plain `agy` command uses the selected account, just as it would after a manual logout/login.
+
+### 4. Check what is active
 
 ```bash
-agy-cli-manager
+agy-profile-linux status
+agy-profile-linux current
+agy-profile-linux list
+```
+
+### 5. Open the dashboard
+
+```bash
+agy-profile-linux
 ```
 
 With no subcommand, the full-screen dashboard opens by default.
@@ -136,18 +133,18 @@ With no subcommand, the full-screen dashboard opens by default.
 ## First Useful Commands
 
 ```bash
-agy-cli-manager status --json
-agy-cli-manager whoami
-agy-cli-manager models --json
-agy-cli-manager ensure-active --json
-agy-cli-manager switch-mode
-agy-cli-manager switch-mode manual
-agy-cli-manager switch-mode auto
-agy-cli-manager switch-policy --json
-agy-cli-manager switch-policy --short-threshold 10 --refresh-failure-threshold 2 --candidate-strategy balanced
-agy-cli-manager refresh-usage --json
-agy-cli-manager switch-next
-agy-cli-manager rotate-after-failure --reason quota --cooldown-minutes 60 --json
+agy-profile-linux status --json
+agy-profile-linux whoami
+agy-profile-linux models --json
+agy-profile-linux ensure-active --json
+agy-profile-linux switch-mode
+agy-profile-linux switch-mode manual
+agy-profile-linux switch-mode auto
+agy-profile-linux switch-policy --json
+agy-profile-linux switch-policy --short-threshold 10 --refresh-failure-threshold 2 --candidate-strategy balanced
+agy-profile-linux refresh-usage --json
+agy-profile-linux switch-next
+agy-profile-linux rotate-after-failure --reason quota --cooldown-minutes 60 --json
 ```
 
 The current switch policy is stored in manager state and can be controlled by either:
@@ -158,7 +155,7 @@ The current switch policy is stored in manager state and can be controlled by ei
 Directory layout:
 
 ```text
-~/.agy-cli-manager/
+~/.agy-profile-linux/
 ├── accounts/
 │   └── <account-name>/
 │       └── .gemini/
@@ -168,66 +165,93 @@ Directory layout:
 └── state.json
 ```
 
-Optional integration:
+## Live switching and isolated runtime
 
-- `live_dir` can point at a real Antigravity/Gemini CLI home such as `~/.gemini`
-- when set, switches sync the managed active profile into that live CLI home
+The normal `switch <name>` command follows the Windows `agy-profile` model. It updates only these account-bound files in your normal `~/.gemini` home:
 
-Example:
-
-```bash
-agy-cli-manager set-live-dir ~/.gemini
-agy-cli-manager apply-active
+```text
+antigravity-cli/antigravity-oauth-token
+antigravity-cli/cache/default_project_id.txt
 ```
 
-This is useful when another process launches `agy` and you want that live home to always reflect the currently active saved profile.
+All other `.gemini` data stays shared. By default the manager checks for a running `agy` process and refuses to switch. To explicitly let it request a graceful close of same-user `agy` processes using the normal live home, use:
+
+```bash
+agy-profile-linux switch account1 --close
+```
+
+The close operation sends `SIGTERM` only; it waits up to 10 seconds and never force-kills. It does not target isolated sessions or processes using another `HOME`. If `agy` does not exit, the switch is aborted and you can close it manually. You can change the wait limit with `--close-timeout-seconds 20`.
+
+The manager then takes a private rollback snapshot, performs the switch while holding its manager lock, and restores the previous files if the operation fails.
+
+If you prefer not to touch the live home, use the isolated runner:
+
+```bash
+agy-profile-linux run -- <agy arguments>
+```
+
+For the old isolated switch behavior, use:
+
+```bash
+agy-profile-linux switch account1 --isolated
+```
+
+A direct `agy` command uses the normal home. After `agy-profile-linux switch account1`, that is the intended command to run.
+
+Legacy `live_dir` synchronization remains disabled. If state from an older build contains a `live_dir`, clear it with:
+
+```bash
+agy-profile-linux set-live-dir
+```
 
 Commands:
 
 ```bash
-agy-cli-manager
-agy-cli-manager dashboard
-agy-cli-manager menu
-agy-cli-manager init
-agy-cli-manager list
-agy-cli-manager current
-agy-cli-manager status
-agy-cli-manager status --json
-agy-cli-manager ensure-active
-agy-cli-manager switch-mode
-agy-cli-manager switch-mode manual
-agy-cli-manager switch-mode auto
-agy-cli-manager switch-policy
-agy-cli-manager refresh-usage
-agy-cli-manager refresh-usage account1 --json
-agy-cli-manager refresh-due
-agy-cli-manager refresh-due --json
-agy-cli-manager models
-agy-cli-manager models --json
-agy-cli-manager models account1 --json
-agy-cli-manager whoami
-agy-cli-manager whoami account1 --refresh
-agy-cli-manager whoami account1 --probe-usage --agy-binary /path/to/agy
-agy-cli-manager add account1 /path/to/source
-agy-cli-manager import-current account1
-agy-cli-manager import-current account1 /path/to/.gemini
-agy-cli-manager login
-agy-cli-manager login account1 --agy-binary /path/to/agy
-agy-cli-manager activate account1
-agy-cli-manager switch account1
-agy-cli-manager rotate
-agy-cli-manager switch-next
-agy-cli-manager disable account1
-agy-cli-manager enable account1
-agy-cli-manager mark-bad account1 --reason quota --cooldown-minutes 60
-agy-cli-manager clear-bad account1
-agy-cli-manager set-live-dir ~/.gemini
-agy-cli-manager apply-active
-agy-cli-manager switch-mode manual
-agy-cli-manager rotate-after-failure --reason quota --cooldown-minutes 60 --json
-agy-cli-manager rotate-after-failure --reason quota --cooldown-minutes 60 --force-switch --json
-agy-cli-manager update-meta account1 --usage-status known --usage-value 42 --reset-at 2026-07-01T00:00:00+00:00 --health-status healthy --last-live-check-at 2026-06-30T06:00:00+00:00 --next-live-check-at 2026-06-30T06:30:00+00:00 --refresh-policy-seconds 1800
-agy-cli-manager update-meta account1 --short-usage-status known --short-usage-value 97.57 --short-reset-at 2026-07-01T00:00:00+00:00 --weekly-usage-status unknown
+agy-profile-linux
+agy-profile-linux dashboard
+agy-profile-linux menu
+agy-profile-linux init
+agy-profile-linux run -- <agy arguments>
+agy-profile-linux list
+agy-profile-linux current
+agy-profile-linux status
+agy-profile-linux status --json
+agy-profile-linux ensure-active
+agy-profile-linux switch-mode
+agy-profile-linux switch-mode manual
+agy-profile-linux switch-mode auto
+agy-profile-linux switch-policy
+agy-profile-linux refresh-usage
+agy-profile-linux refresh-usage account1 --json
+agy-profile-linux refresh-due
+agy-profile-linux refresh-due --json
+agy-profile-linux models
+agy-profile-linux models --json
+agy-profile-linux models account1 --json
+agy-profile-linux whoami
+agy-profile-linux whoami account1 --refresh
+agy-profile-linux whoami account1 --probe-usage --agy-binary /path/to/agy
+agy-profile-linux add account1 /path/to/source
+agy-profile-linux import-current account1 /path/to/.gemini
+agy-profile-linux save account1
+agy-profile-linux login
+agy-profile-linux login account1 --agy-binary /path/to/agy
+agy-profile-linux activate account1
+agy-profile-linux switch account1
+agy-profile-linux switch account1 --isolated
+agy-profile-linux rotate
+agy-profile-linux switch-next
+agy-profile-linux disable account1
+agy-profile-linux enable account1
+agy-profile-linux mark-bad account1 --reason quota --cooldown-minutes 60
+agy-profile-linux clear-bad account1
+agy-profile-linux set-live-dir
+agy-profile-linux apply-active
+agy-profile-linux switch-mode manual
+agy-profile-linux rotate-after-failure --reason quota --cooldown-minutes 60 --json
+agy-profile-linux rotate-after-failure --reason quota --cooldown-minutes 60 --force-switch --json
+agy-profile-linux update-meta account1 --usage-status known --usage-value 42 --reset-at 2026-07-01T00:00:00+00:00 --health-status healthy --last-live-check-at 2026-06-30T06:00:00+00:00 --next-live-check-at 2026-06-30T06:30:00+00:00 --refresh-policy-seconds 1800
+agy-profile-linux update-meta account1 --short-usage-status known --short-usage-value 97.57 --short-reset-at 2026-07-01T00:00:00+00:00 --weekly-usage-status unknown
 ```
 
 `add` accepts either:
@@ -240,16 +264,16 @@ agy-cli-manager update-meta account1 --short-usage-status known --short-usage-va
 For automation, prefer the JSON-capable commands:
 
 ```bash
-agy-cli-manager status --json
-agy-cli-manager current --json
-agy-cli-manager list --json
-agy-cli-manager ensure-active --json
-agy-cli-manager switch-policy --json
-agy-cli-manager switch-policy --short-threshold 12.5 --refresh-failure-threshold 3 --candidate-strategy highest-short --json
-agy-cli-manager refresh-usage account1 --json
-agy-cli-manager refresh-due --json
-agy-cli-manager models --json
-agy-cli-manager rotate-after-failure --reason quota --cooldown-minutes 60 --json
+agy-profile-linux status --json
+agy-profile-linux current --json
+agy-profile-linux list --json
+agy-profile-linux ensure-active --json
+agy-profile-linux switch-policy --json
+agy-profile-linux switch-policy --short-threshold 12.5 --refresh-failure-threshold 3 --candidate-strategy highest-short --json
+agy-profile-linux refresh-usage account1 --json
+agy-profile-linux refresh-due --json
+agy-profile-linux models --json
+agy-profile-linux rotate-after-failure --reason quota --cooldown-minutes 60 --json
 ```
 
 Typical external-app flow:
@@ -266,11 +290,11 @@ Typical external-app flow:
 
 Notes:
 
-- running `agy-cli-manager` with no subcommand opens the full-screen dashboard
+- running `agy-profile-linux` with no subcommand opens the full-screen dashboard
 - `dashboard` is a TTY-only full-screen view with a fast local-only UI refresh and manual account actions
 - `list`, `current`, `activate`, and `rotate` are convenience commands for standalone use; they map to the same manager state as the lower-level commands.
 - local operator notes such as `AGENTS.md` are intentionally kept untracked and are not part of the public repo contract.
-- `agy-cli-manager login` prompts for the account name if you do not pass one
+- `agy-profile-linux login` prompts for the account name if you do not pass one
 - `switch-next` skips accounts in cooldown.
 - `mark-bad` clears the active pointer if that account was active.
 - `ensure-active` evaluates the current policy and can automatically recover from no active account, known low 5-hour quota, auth missing, or repeated refresh failures.
@@ -278,10 +302,11 @@ Notes:
 - `switch-mode` controls whether `rotate-after-failure` automatically moves to the next eligible standby account or stops after marking the active account bad.
 - `switch-policy` controls the proactive short-window threshold, refresh-failure threshold, and standby candidate ranking strategy.
 - state and switching are protected by a single lock file so a caller can safely trigger failover from another process.
-- `set-live-dir` lets the manager drive a real CLI home in addition to its own internal `runtime/`.
+- `run` holds that lock while it runs `agy` with `HOME` set to the private runtime.
+- `set-live-dir` clears only a legacy setting; assigning a real CLI home is disabled in this fork.
 - the manager currently copies the managed profile under `.gemini/`, centered on the Antigravity auth/token artifacts it needs for switching.
 - it supports Antigravity-style `antigravity-cli/antigravity-oauth-token` auth storage and related identity extraction.
-- `login` hands the terminal directly to a real `agy` session in the configured runtime home; complete onboarding/login there, exit `agy`, and the manager then saves the captured profile snapshot.
+- `login` hands the terminal directly to a real `agy` session in a disposable home; complete onboarding/login there, exit `agy`, and the manager saves the captured profile snapshot.
 - `login` stores the profile under the detected account name when available, not just the typed label.
 - if that detected account already exists, `login` warns and asks whether to overwrite the saved profile.
 - `whoami` reports the detected signed-in account name from profile metadata, and `--probe-usage` can additionally run `agy -p /usage` against that profile as a live check.
@@ -316,7 +341,7 @@ Python usage:
 ```python
 from pathlib import Path
 
-from agy_cli_manager import (
+from agy_profile_linux import (
     build_paths,
     get_status_snapshot,
     get_switch_policy,
@@ -325,7 +350,7 @@ from agy_cli_manager import (
     update_switch_policy,
 )
 
-paths = build_paths(Path.home() / ".agy-cli-manager")
+paths = build_paths(Path.home() / ".agy-profile-linux")
 snapshot = get_status_snapshot(paths)
 policy = get_switch_policy(paths)
 update_switch_policy(paths, short_usage_threshold_percent=12.5, candidate_strategy="highest-short")
@@ -349,9 +374,10 @@ Public Python API:
 - `refresh_due_account(paths, ...)`
 - `switch_account(paths, name)`
 - `switch_next(paths)`
-- `rotate_after_failure(paths, reason, cooldown_minutes=60, live_dir=None, force_switch=False)`
+- `run_active(paths, agy_binary=None, agy_args=None)`
+- `rotate_after_failure(paths, reason, cooldown_minutes=60, force_switch=False)`
 - `set_switch_mode(paths, mode)`
-- `set_live_dir(paths, live_dir)`
+- `set_live_dir(paths, None)` (clear legacy state only)
 - `update_account_runtime_metadata(paths, name, ...)`
 
 Important returned state:
@@ -372,9 +398,9 @@ More explicit example:
 ```python
 from pathlib import Path
 
-from agy_cli_manager import build_paths, ensure_layout, list_models
+from agy_profile_linux import build_paths, ensure_layout, list_models
 
-paths = build_paths(Path.home() / ".agy-cli-manager")
+paths = build_paths(Path.home() / ".agy-profile-linux")
 ensure_layout(paths)
 
 payload = list_models(paths)

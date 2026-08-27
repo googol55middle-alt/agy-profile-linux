@@ -3,18 +3,19 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agy-cli-manager"
-version = "0.2.1"
-description = "Active-standby account manager for Antigravity CLI"
+name = "agy-profile-linux"
+version = "0.1.0"
+description = "Hardened Linux account switcher for Antigravity CLI"
 requires-python = ">=3.10"
 readme = "README.md"
 authors = [
-  { name = "zcop" }
+  { name = "agy-profile-linux contributors" }
 ]
 dependencies = []
 
 [project.scripts]
-agy-cli-manager = "agy_cli_manager.cli:main"
+agy-profile-linux = "agy_profile_linux.cli:main"
+agy-profile = "agy_profile_linux.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
