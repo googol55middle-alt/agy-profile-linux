@@ -170,6 +170,7 @@ With no subcommand, the full-screen dashboard opens by default.
 ```bash
 agy-profile-linux status --json
 agy-profile-linux whoami
+agy-profile-linux verify-accounts --json
 agy-profile-linux models --json
 agy-profile-linux ensure-active --json
 agy-profile-linux switch-mode
@@ -186,6 +187,8 @@ The current switch policy is stored in manager state and can be controlled by ei
 
 - CLI: `switch-mode`, `switch-policy`, `ensure-active`
 - Python API: `get_status_snapshot()`, `get_switch_policy()`, `update_switch_policy()`, `ensure_active_account()`
+
+`verify-accounts` prints each saved account's verification status. It returns exit code `0` only when at least one account exists and every account reports `problem_status: ok`; it returns exit code `1` when an account needs attention or no accounts exist. This makes it suitable as a verification gate for shell automation.
 
 Directory layout:
 
@@ -289,6 +292,8 @@ agy-profile-linux update-meta account1 --usage-status known --usage-value 42 --r
 agy-profile-linux update-meta account1 --short-usage-status known --short-usage-value 97.57 --short-reset-at 2026-07-01T00:00:00+00:00 --weekly-usage-status unknown
 ```
 
+Additional inspection commands include `verify-accounts`, `switch-runtime`, and `switch-history`. Per-account proxy metadata is available through `proxy-list`, `proxy-show`, `proxy-set`, and `proxy-clear`; the proxy dashboard currently displays saved metadata only and does not wire proxies into runtime traffic.
+
 `add` accepts either:
 
 - a directory that is already a `.gemini` profile root
@@ -304,7 +309,7 @@ python -m py_compile src/agy_profile_linux/*.py tests/test_manager_hardening.py
 python -m pip wheel --no-deps . --wheel-dir dist
 ```
 
-The GitHub Actions workflow runs these checks on Python 3.10, 3.11, and 3.12.
+The GitHub Actions workflow runs these checks on Python 3.10, 3.11, 3.12, and 3.13, including a clean wheel-install and console-entry-point smoke test.
 
 ## JSON/API-oriented usage
 

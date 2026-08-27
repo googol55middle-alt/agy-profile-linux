@@ -1752,21 +1752,23 @@ def print_switch_history(paths, as_json: bool, limit: int) -> None:
         )
 
 
-def print_verify_accounts(paths, as_json: bool) -> None:
+def print_verify_accounts(paths, as_json: bool) -> int:
     payload = verify_accounts(paths)
     if as_json:
         print(json.dumps(payload, indent=2, sort_keys=True))
-        return
+        accounts = payload.get("accounts") or {}
+        return 0 if accounts and all(info.get("problem_status") == "ok" for info in accounts.values()) else 1
     accounts = payload.get("accounts") or {}
     if not accounts:
         print("no-accounts")
-        return
+        return 1
     for name, info in accounts.items():
         print(
             f"{name}: {info.get('problem_status') or '-'} "
             f"(action={info.get('recommended_action') or '-'}) "
             f"- {info.get('summary') or '-'}"
         )
+    return 0 if all(info.get("problem_status") == "ok" for info in accounts.values()) else 1
 
 
 def print_proxy_list(paths, as_json: bool) -> None:
@@ -1831,8 +1833,7 @@ def main() -> int:
                 print(format_status(paths))
             return 0
         if args.command == "verify-accounts":
-            print_verify_accounts(paths, args.json)
-            return 0
+            return print_verify_accounts(paths, args.json)
         if args.command == "switch-runtime":
             print_switch_runtime(paths, args.json)
             return 0

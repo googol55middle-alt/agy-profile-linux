@@ -185,14 +185,15 @@
       </aside>
     </section>
 
-    <section class="section">
+    <section class="section" id="install">
       <h2>Install this project</h2>
       <p class="muted">Open a terminal on the machine where you want to install the project. Copy and paste this entire block:</p>
       <pre><code>git clone https://github.com/googol55middle-alt/agy-profile-linux.git
 cd agy-profile-linux
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install .</code></pre>
+python -m pip install --upgrade .</code></pre>
+      <p class="muted">After installation, verify the command is available with <code>agy-profile-linux --help</code>.</p>
     </section>
 
     <section class="section">
@@ -253,8 +254,8 @@ python -m pip install .</code></pre>
           <p>Inspect active, standby, cooldown, usage, and switch runtime state from a focused TUI built for operator workflows.</p>
         </div>
         <div class="card">
-          <h3>External integrations</h3>
-          <p>Call the CLI or Python API from schedulers or other local automation that needs coordinated account switching.</p>
+          <h3>Using from external programs</h3>
+          <p>Call the CLI or Python API from schedulers or other local automation that needs coordinated account switching. No app-specific integration is included.</p>
         </div>
       </div>
     </section>

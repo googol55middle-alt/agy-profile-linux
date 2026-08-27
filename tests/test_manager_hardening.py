@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import contextmanager, redirect_stderr
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from email.message import Message
 from pathlib import Path
 from queue import SimpleQueue
@@ -1211,6 +1211,28 @@ sys.exit(17)
         self.assertFalse(result["ok"])
         self.assertEqual("Usage refresh failed.", result["error"])
         self.assertNotIn(marker, result["error"])
+
+    def test_cli_verify_accounts_returns_nonzero_for_unhealthy_account(self):
+        manager.ensure_layout(self.paths)
+        profile = self.paths.accounts_dir / "bad" / ".gemini" / "antigravity-cli"
+        profile.mkdir(parents=True)
+        (profile / "antigravity-oauth-token").write_text('{"token": {}}', encoding="utf-8")
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["agy-profile-linux", "--root", str(self.paths.root), "verify-accounts"],
+            ),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            exit_code = cli.main()
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("bad: missing_auth", stdout.getvalue())
+        self.assertEqual("", stderr.getvalue())
 
 
 if __name__ == "__main__":

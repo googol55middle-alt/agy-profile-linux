@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.0
+## v0.1.0 - 2026-08-27
 
 - publish the Linux-focused `agy-profile-linux` distribution and CLI entrypoint
 - rename the Python package to `agy_profile_linux`
@@ -12,11 +12,15 @@
 - add Linux-only packaging metadata, credential-state ignore rules, and source-install documentation
 - retain the MIT license and credit the upstream `agy-cli-manager` base
 
-## v0.2.1 - 2026-07-15
+## Upstream base history
+
+The following entries describe the upstream base version retained by this fork; they are not releases of `agy-profile-linux`.
+
+### 0.2.1 - 2026-07-15
 
 - preserve the explicit profile name supplied during login
 
-## v0.2.0 - 2026-07-01
+### 0.2.0 - 2026-07-01
 
 - add account model discovery via Python API and `agy-profile-linux models --json`
 - add `refresh-due` for non-interactive due-account usage refresh
