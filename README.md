@@ -26,7 +26,7 @@ It is designed for one active account at a time:
 
 It is application-agnostic. External programs can call its CLI or Python API; this project does not include app-specific integrations.
 
-![Sanitized dashboard example](docs/dashboard-screenshot.svg)
+The interactive dashboard is available with `agy-profile-linux dashboard` (or by running `agy-profile-linux` with no subcommand) in a terminal.
 
 ## Before you start
 
