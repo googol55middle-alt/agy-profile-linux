@@ -1,6 +1,6 @@
 # Local hardening notes
 
-This is an independent Linux fork based on upstream `agy-cli-manager` 0.2.1. It is not affiliated with the upstream maintainers, Google, or Antigravity.
+This is a separate Linux project derived from the upstream `agy-cli-manager` 0.2.1 codebase. It is maintained independently in this repository and is not the upstream project or an official Google/Antigravity product.
 
 ## Security changes
 

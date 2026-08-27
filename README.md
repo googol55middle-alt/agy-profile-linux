@@ -4,7 +4,7 @@
 
 [Project website](https://googol55middle-alt.github.io/agy-profile-linux/) · [Security policy](SECURITY.md)
 
-`agy-profile-linux` is an independent Linux fork based on upstream 0.2.1. It is not affiliated with the upstream maintainers, Google, or Antigravity.
+`agy-profile-linux` is a separate Linux project derived from the upstream `agy-cli-manager` 0.2.1 codebase. It is maintained independently in this repository and is not the upstream project or an official Google/Antigravity product.
 
 > **Security and credential warning:** OAuth credentials are stored locally as owner-readable files with restrictive permissions, but they are **not encrypted at rest**. Protect the host, backups, snapshots, home directory, and any custom `--root` directory. This project is not a password manager or a defense against malware, root access, or a compromised backup. See [SECURITY.md](SECURITY.md) before using real accounts.
 >
@@ -45,7 +45,7 @@ Related project:
 
 - [upstream `agy-cli-manager`](https://github.com/zcop/agy-cli-manager) 0.2.1
 
-This fork is independent and includes Linux-specific changes. Do not assume that an upstream release wheel contains the changes described here.
+This project includes Linux-specific changes. Do not assume that an upstream release wheel contains the changes described here.
 
 ## What it does
 
@@ -355,7 +355,7 @@ Notes:
 - `switch-policy` controls the proactive short-window threshold, refresh-failure threshold, and standby candidate ranking strategy.
 - state and switching are protected by a single lock file so another process can coordinate failover without racing a concurrent switch.
 - `run` holds that lock while it runs `agy` with `HOME` set to the private runtime.
-- `set-live-dir` clears only a legacy setting; assigning a real CLI home is disabled in this fork.
+- `set-live-dir` clears only a legacy setting; assigning a real CLI home is disabled in this project.
 - the manager currently copies the managed profile under `.gemini/`, centered on the Antigravity auth/token artifacts it needs for switching.
 - it supports Antigravity-style `antigravity-cli/antigravity-oauth-token` auth storage and related identity extraction.
 - `login` hands the terminal directly to a real `agy` session in a disposable home; complete onboarding/login there, exit `agy`, and the manager saves the captured profile snapshot.

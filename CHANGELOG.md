@@ -14,7 +14,7 @@
 
 ## Upstream base history
 
-The following entries describe the upstream base version retained by this fork; they are not releases of `agy-profile-linux`.
+The following entries describe the upstream base version retained by this derived project; they are not releases of `agy-profile-linux`.
 
 ### 0.2.1 - 2026-07-15
 
