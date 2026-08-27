@@ -82,13 +82,17 @@ Read [LOCAL_HARDENING.md](LOCAL_HARDENING.md) before importing an account or run
 
 Do **not** replace this build with an upstream release wheel: the upstream release does not contain these local security changes.
 
-From this checkout:
+Open a terminal on the machine where you want to install the project. Copy and paste this entire block:
 
 ```bash
+git clone https://github.com/googol55middle-alt/agy-profile-linux.git
+cd agy-profile-linux
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade .
 ```
+
+These commands download the project into a new `agy-profile-linux` directory and install it in a local Python environment inside that directory.
 
 After installation, verify the command is available:
 
